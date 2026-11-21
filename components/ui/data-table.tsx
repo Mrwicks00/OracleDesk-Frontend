@@ -8,6 +8,7 @@ import {
   type SortDirection,
   type SortValue,
 } from "./data-table-utils";
+import { VirtualTableBody } from "./virtual-list";
 
 export type { SortDirection, SortValue } from "./data-table-utils";
 
@@ -55,6 +56,11 @@ export interface DataTableProps<Row> {
   live?: DataTableLive<Row>;
   className?: string;
   rowClassName?: (row: Row) => string | undefined;
+  /**
+   * Window-virtualize the table body (card layout below `md` is not
+   * virtualized). Rows get `aria-rowindex`; the table gets `aria-rowcount`.
+   */
+  virtualize?: { estimateSize: number; restorationKey?: string };
 }
 
 const SCROLL_HOLD_MS = 5000;
@@ -96,6 +102,7 @@ export function DataTable<Row>({
   live,
   className = "",
   rowClassName,
+  virtualize,
 }: DataTableProps<Row>) {
   const uid = useId();
   const captionId = `${uid}-caption`;
@@ -217,6 +224,27 @@ export function DataTable<Row>({
 
   const emptyOrLoading = loading ? "Loading…" : emptyState;
 
+  const renderRow = (row: Row, ariaRowIndex?: number) => (
+    <tr
+      key={getRowId(row)}
+      aria-rowindex={ariaRowIndex}
+      data-virtual-table-row={ariaRowIndex !== undefined ? ariaRowIndex - 2 : undefined}
+      className={`border-b border-outline-variant/30 transition-colors hover:bg-surface-container ${rowClassName?.(row) ?? ""}`}
+    >
+      {columns.map((column) =>
+        column.id === rowHeaderId ? (
+          <th key={column.id} scope="row" className={`${cellClass(column)} font-normal`}>
+            {column.cell(row)}
+          </th>
+        ) : (
+          <td key={column.id} className={cellClass(column)}>
+            {column.cell(row)}
+          </td>
+        ),
+      )}
+    </tr>
+  );
+
   return (
     <div className={className}>
       {live && (
@@ -247,13 +275,13 @@ export function DataTable<Row>({
         className="hidden overflow-x-auto focus-visible:ring-2 focus-visible:ring-primary md:block"
         {...wrapperHandlers}
       >
-        <table className="w-full text-start">
+        <table className="w-full text-start" aria-rowcount={virtualize && sortedRows.length > 0 ? sortedRows.length + 1 : undefined}>
           <caption id={captionId} className={captionHidden ? "sr-only" : "pb-3 text-start text-sm font-bold text-on-surface"}>
             {caption}
             {captionExtra ? <> {captionExtra}</> : null}
           </caption>
           <thead>
-            <tr className="border-b border-outline-variant">
+            <tr aria-rowindex={virtualize ? 1 : undefined} className="border-b border-outline-variant">
               {columns.map((column) => {
                 const active = sort?.columnId === column.id && column.sortValue ? sort.direction : null;
                 return (
@@ -280,34 +308,26 @@ export function DataTable<Row>({
               })}
             </tr>
           </thead>
-          <tbody className="font-data-mono text-body-md">
-            {sortedRows.length === 0 ? (
+          {sortedRows.length === 0 ? (
+            <tbody className="font-data-mono text-body-md">
               <tr>
                 <td colSpan={colSpan} className="py-6 text-center text-on-surface-variant">
                   {emptyOrLoading}
                 </td>
               </tr>
-            ) : (
-              sortedRows.map((row) => (
-                <tr
-                  key={getRowId(row)}
-                  className={`border-b border-outline-variant/30 transition-colors hover:bg-surface-container ${rowClassName?.(row) ?? ""}`}
-                >
-                  {columns.map((column) =>
-                    column.id === rowHeaderId ? (
-                      <th key={column.id} scope="row" className={`${cellClass(column)} font-normal`}>
-                        {column.cell(row)}
-                      </th>
-                    ) : (
-                      <td key={column.id} className={cellClass(column)}>
-                        {column.cell(row)}
-                      </td>
-                    ),
-                  )}
-                </tr>
-              ))
-            )}
-          </tbody>
+            </tbody>
+          ) : virtualize ? (
+            <VirtualTableBody
+              items={sortedRows}
+              colSpan={colSpan}
+              getKey={(row) => getRowId(row)}
+              estimateSize={() => virtualize.estimateSize}
+              restorationKey={virtualize.restorationKey}
+              renderRow={(row, _index, a11y) => renderRow(row, a11y["aria-rowindex"])}
+            />
+          ) : (
+            <tbody className="font-data-mono text-body-md">{sortedRows.map((row) => renderRow(row))}</tbody>
+          )}
         </table>
       </div>
 
