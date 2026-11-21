@@ -42,6 +42,9 @@ import { LiveRegion } from "@/components/ui/live-region";
 import { useDirection } from "@/components/layout/DirectionProvider";
 import { Ltr } from "@/components/ui/ltr";
 import Link from "next/link";
+import { BpsSlider } from "@/components/ui/slider";
+import { SlippagePicker } from "@/components/ui/slippage-picker";
+import { amountForBps, bpsForAmount } from "@/lib/format/allocation";
 const QUOTE_DEBOUNCE_MS = 400;
 /** Below this remaining edge (1 point) the user must tick a box before copying. */
 const MIN_EDGE_WARN_BPS = 100n;
@@ -149,6 +152,10 @@ function CopyTradeContent() {
 
   // Allocation as a share of the wallet's USDC balance, in basis points.
   const [allocationBps, setAllocationBps] = useState(1250);
+  // Numeric alternative: the text is only used while the user is mid-edit.
+  const [amountText, setAmountText] = useState("");
+  const [amountFocused, setAmountFocused] = useState(false);
+  const [amountError, setAmountError] = useState<string | null>(null);
   const [sizingKind, setSizingKind] = useState<SizingKind>("percent");
   const [fixedInput, setFixedInput] = useState("");
   const [capInput, setCapInput] = useState("");
@@ -161,7 +168,6 @@ function CopyTradeContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [reviewModel, setReviewModel] = useState<{ model: ReviewModel; changedFrom?: ReviewModel } | null>(null);
   const reviewResolver = useRef<((approved: boolean) => void) | null>(null);
-  const sliderRef = useRef<HTMLDivElement>(null);
   const allocationControlRef = useRef<HTMLButtonElement | null>(null);
   const reviewPreparedBuy = useCallback<PreparedWriteReview>(async (_prepared, model, changedFrom, forceReview = false) => {
     if (!forceReview && shouldSkipTxReview()) return true;
@@ -192,7 +198,6 @@ function CopyTradeContent() {
   const waitingForBuy =
     submitQueue.waiting.some((job) => job.label === buyLabel) ||
     (submitQueue.lockWaiting && submitQueue.running?.label === buyLabel);
-  const allocation = allocationBps / 100;
   const fixedAmount = tryParseUsdc(fixedInput);
   const userCap = tryParseUsdc(capInput);
   const sizingMode: SizingMode =
@@ -204,6 +209,31 @@ function CopyTradeContent() {
   const choice = balance.data !== undefined ? chooseCollateral(sizingMode, { balance: balance.data, userCap }) : null;
   const amountRaw = choice ? choice.amount : null;
   const slippageBps = slippageOverrideBps ?? settings.slippageBps;
+
+  // The trade amount is always amountForBps(balance, bps): typing an exact
+  // amount picks the largest whole-bps share that does not exceed it, so the
+  // amount shown after editing can be slightly below what was typed.
+  const allocationValueText = (bps: number) =>
+    balance.data !== undefined
+      ? `${bpsToPercent(bps, 2)} of balance, ${formatUsdc(amountForBps(balance.data, bps), { maxDecimals: 2, grouping: true })} USDC`
+      : `${bpsToPercent(bps, 2)} of balance`;
+  const onAmountTyped = (text: string) => {
+    setAmountText(text);
+    if (balance.data === undefined) return;
+    if (text.trim() === "") {
+      setAmountError(null);
+      return;
+    }
+    const parsed = tryParseUsdc(text);
+    if (parsed === null) {
+      setAmountError("Enter an amount like 10 or 2.5, with up to 7 decimal places.");
+    } else if (parsed > balance.data) {
+      setAmountError(`That is more than your balance of ${formatUsdc(balance.data, { maxDecimals: 2, grouping: true })} USDC.`);
+    } else {
+      setAmountError(null);
+      setAllocationBps(bpsForAmount(balance.data, parsed));
+    }
+  };
 
   // The agent's estimate and the copy's own cost on the current reserves, all in bigint bps.
   const estimateYesBps = trace ? estimateToBps(trace.probabilityEstimate) : null;
@@ -238,37 +268,6 @@ function CopyTradeContent() {
   const xlmDeficit = (reserve.data?.funded && fees && fees.totalFee > reserve.data.spendable)
     ? fees.totalFee - reserve.data.spendable
     : null;
-
-  const handleSliderInteraction = (clientX: number) => {
-    if (!sliderRef.current) return;
-    const rect = sliderRef.current.getBoundingClientRect();
-    const x = dir === "rtl" ? rect.right - clientX : clientX - rect.left;
-    const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
-    setAllocationBps(Math.round(percentage * 100));
-  };
-
-  const onMouseDown = (e: React.MouseEvent) => {
-    handleSliderInteraction(e.clientX);
-    const onMouseMove = (moveEvent: MouseEvent) => handleSliderInteraction(moveEvent.clientX);
-    const onMouseUp = () => {
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  };
-
-  const onTouchMove = (e: React.TouchEvent) => {
-    handleSliderInteraction(e.touches[0].clientX);
-  };
-
-  const onSliderKey = (e: React.KeyboardEvent) => {
-    const step = e.shiftKey ? 1000 : 100;
-    const incKey = dir === "rtl" ? "ArrowLeft" : "ArrowRight";
-    const decKey = dir === "rtl" ? "ArrowRight" : "ArrowLeft";
-    if (e.key === incKey || e.key === "ArrowUp") setAllocationBps((v) => Math.min(10_000, v + step));
-    if (e.key === decKey || e.key === "ArrowDown") setAllocationBps((v) => Math.max(0, v - step));
-  };
 
   const handleConfirm = async () => {
     if (!isConnected || !address) {
@@ -547,59 +546,53 @@ function CopyTradeContent() {
               {choice?.unavailable && sizingKind === "mirror" && <p className="text-[11px] text-error">{choice.unavailable}</p>}
               {sizingKind === "percent" && (
               <>
-              <div
-                ref={sliderRef}
-                className="relative h-2 bg-surface-container rounded-full cursor-pointer touch-none focus:outline-none focus:ring-2 focus:ring-primary"
-                role="slider"
-                tabIndex={0}
-                aria-label="Share of your USDC balance"
-                aria-valuemin={0}
-                aria-valuemax={10000}
-                aria-valuenow={allocationBps}
-                aria-valuetext={`${bpsToPercent(allocationBps, 2)} of your balance${amountRaw !== null ? `, ${formatUsdc(amountRaw, { maxDecimals: 2, minDecimals: 2, grouping: true })} USDC` : ""}`}
-                onKeyDown={onSliderKey}
-                onMouseDown={onMouseDown}
-                onTouchStart={(e) => handleSliderInteraction(e.touches[0].clientX)}
-                onTouchMove={onTouchMove}
-              >
-                <div className="absolute inset-y-0 bg-primary-container rounded-full" style={{ insetInlineStart: 0, width: `${allocation}%` }}></div>
-                <div className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-primary border-2 border-white rounded-full shadow-md" style={{ insetInlineStart: `calc(${allocation}% - 8px)` }}></div>
-              </div>
-              <div className="flex justify-between text-[10px] font-medium text-on-surface-variant px-1">
-                <span>0%</span>
-                <span>25%</span>
-                <span>50%</span>
-                <span>75%</span>
-                <span>100%</span>
+              <span id="allocation-slider-label" className="block text-[11px] text-on-surface-variant">Share of your USDC balance</span>
+              <BpsSlider
+                id="allocation-slider"
+                labelledBy="allocation-slider-label"
+                label="Share of your USDC balance"
+                value={allocationBps}
+                onValueChange={setAllocationBps}
+                dir={dir}
+                valueText={allocationValueText}
+                describedBy="allocation-amount-help"
+              />
+              <div className="space-y-1">
+                <label htmlFor="allocation-amount" className="text-[11px] text-on-surface-variant">Amount (USDC)</label>
+                <input
+                  id="allocation-amount"
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  disabled={balance.data === undefined || (isWatching && !isConnected)}
+                  value={amountFocused ? amountText : amountRaw !== null ? formatUsdc(amountRaw) : ""}
+                  placeholder={balance.data === undefined ? "Balance not loaded" : "0"}
+                  onFocus={() => {
+                    setAmountText(amountRaw !== null ? formatUsdc(amountRaw) : "");
+                    setAmountFocused(true);
+                  }}
+                  onBlur={() => {
+                    setAmountFocused(false);
+                    setAmountError(null);
+                  }}
+                  onChange={(e) => onAmountTyped(e.target.value)}
+                  aria-invalid={amountError !== null}
+                  aria-describedby={amountError ? "allocation-amount-error allocation-amount-help" : "allocation-amount-help"}
+                  className="w-full border border-outline-variant rounded px-3 py-2 font-data-mono text-sm bg-white disabled:opacity-50"
+                />
+                {amountError && <p id="allocation-amount-error" className="text-[11px] text-error">{amountError}</p>}
+                <p id="allocation-amount-help" className="text-[11px] text-on-surface-variant">
+                  {balance.data === undefined
+                    ? "Connect a wallet with a loaded USDC balance to type an exact amount. The slider still sets a share of your balance."
+                    : "Typing an amount sets the closest share of your balance that does not exceed it. The trade uses the amount shown here."}
+                </p>
               </div>
               </>
               )}
             </div>
 
             <div className="p-4 bg-surface-container-low rounded-lg space-y-4">
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <Icon name="settings" className="text-outline text-sm" />
-                  <span className="font-label-caps text-label-caps text-on-surface-variant uppercase text-[10px]">
-                    Slippage Tolerance ({bpsToPercent(slippageBps)})
-                  </span>
-                </div>
-                <div className="flex gap-2 w-full sm:w-auto">
-                  {SLIPPAGE_PRESET_BPS.map((bps) => (
-                    <button
-                      key={bps}
-                      onClick={() => setSlippageOverrideBps(bps)}
-                      className={`flex-1 sm:flex-none px-3 py-1 text-[11px] font-bold border rounded transition-all ${
-                        slippageBps === bps
-                          ? "border-primary border-2 bg-white text-primary"
-                          : "border-outline-variant bg-white hover:border-primary text-on-surface-variant"
-                      }`}
-                    >
-                      {bpsToPercent(bps)}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <SlippagePicker value={slippageBps} onChange={setSlippageOverrideBps} presets={[...SLIPPAGE_PRESET_BPS]} dir={dir} />
               {slippageOverrideBps === null && (
                 <p className="text-[11px] text-on-surface-variant">
                   Using your default from Settings. Pick a value above to override it for this trade only.
