@@ -59,12 +59,14 @@ export interface DataTableProps<Row> {
 
 const SCROLL_HOLD_MS = 5000;
 
-const alignClass = (column: ColumnDef<unknown>) => {
+type Layout = { numeric?: boolean; align?: "start" | "end" | "center" };
+
+const alignClass = (column: Layout) => {
   const align = column.numeric ? "end" : (column.align ?? "start");
   return align === "end" ? "text-end" : align === "center" ? "text-center" : "text-start";
 };
 
-const cellClass = (column: ColumnDef<unknown>) =>
+const cellClass = (column: Layout) =>
   `py-3 ${alignClass(column)}${column.numeric ? " font-data-mono tabular-nums" : ""}`;
 
 function SortIcon({ direction }: { direction: SortDirection | null }) {
