@@ -363,19 +363,14 @@ export default function MarketsPageClient() {
   return (
     <div className="min-h-screen bg-surface">
       <main className="pt-24 pb-12 px-gutter max-w-container-max-width mx-auto">
+        <h1 id="markets-heading" tabIndex={-1} className="sr-only outline-none">
+          Markets
+        </h1>
         <FilterBar
           status={status}
           setStatus={handleSetStatus}
           category={category}
           setCategory={setCategory}
-        <h1 id="markets-heading" tabIndex={-1} className="sr-only outline-none">
-          Markets
-        </h1>
-        <FilterBar 
-          status={status} 
-          setStatus={(s) => setStatus(s as MarketStatus)} 
-          category={category} 
-          setCategory={setCategory} 
         />
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">

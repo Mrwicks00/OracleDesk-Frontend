@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
@@ -6,9 +7,10 @@ import nextTs from "eslint-config-next/typescript";
 // When the package is not present the import resolves to null and the rules
 // block below is skipped, so the build does not break before the package is
 // added. Remove the null-check once the package is in package.json.
-let reactCompilerPlugin: import("eslint").ESLint.Plugin | null = null;
+const require = createRequire(import.meta.url);
+/** @type {import("eslint").ESLint.Plugin | null} */
+let reactCompilerPlugin = null;
 try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   reactCompilerPlugin = require("eslint-plugin-react-compiler");
 } catch {
   // package not yet installed — skip
