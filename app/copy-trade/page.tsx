@@ -20,7 +20,8 @@ import { useMarket } from "@/lib/hooks/useMarkets";
 import { useQuoteBuy, useUsdcBalance, useAccountReserve, usePrepareBuy, useOnChainMarket, fetchOnChainMarketBySimulation, useUsdcTrustline, useEnableUsdc, useUsdcBalanceState, type PreparedWriteReview } from "@/lib/hooks/useStellar";
 import { explorerTx, NETWORK_LABEL } from "@/lib/stellar/config";
 import { parseRecordId } from "@/lib/validation/ids";
-import { formatUsdc, formatXlm, minOut, bpsToPercent, probabilityToBps, tryParseUsdc, BPS } from "@/lib/stellar/units";
+import { formatXlm, minOut, probabilityToBps, BPS } from "@/lib/stellar/units";
+import { useFormat, type Formatters } from "@/lib/format/useFormat";
 import { chooseCollateral, maxCollateralForEdge, quoteCopy, type CopyMarket, type CopyQuote, type SizingMode } from "@/lib/stellar/quote";
 import type { OutcomeTag } from "@/lib/stellar/clients";
 import { TxPhase } from "@/lib/stellar/tx-lifecycle";
@@ -83,7 +84,7 @@ function tryQuoteCopy(
   }
 }
 
-const formatEdge = (bps: bigint) => `${bps >= 0n ? "+" : ""}${(Number(bps) / 100).toFixed(1)} pts`;
+const formatEdge = (bps: bigint, fmt: Formatters) => `${bps >= 0n ? "+" : ""}${fmt.points(bps)} pts`;
 
 function renderTxPhase(phase: TxPhase): string | null {
   switch (phase.name) {
@@ -138,6 +139,7 @@ function CopyTradeContent() {
 
   const { viewed, isWatching } = useViewedAddress();
   const dir = useDirection();
+  const fmt = useFormat();
   const balance = useUsdcBalance(address);
   const balanceState = useUsdcBalanceState(address);
   const ledger = useLedgerNow();
@@ -198,8 +200,8 @@ function CopyTradeContent() {
   const waitingForBuy =
     submitQueue.waiting.some((job) => job.label === buyLabel) ||
     (submitQueue.lockWaiting && submitQueue.running?.label === buyLabel);
-  const fixedAmount = tryParseUsdc(fixedInput);
-  const userCap = tryParseUsdc(capInput);
+  const fixedAmount = fmt.tryParseAmount(fixedInput);
+  const userCap = fmt.tryParseAmount(capInput);
   const sizingMode: SizingMode =
     sizingKind === "fixed"
       ? { kind: "fixed", amount: fixedAmount ?? 0n }
@@ -215,8 +217,8 @@ function CopyTradeContent() {
   // amount shown after editing can be slightly below what was typed.
   const allocationValueText = (bps: number) =>
     balance.data !== undefined
-      ? `${bpsToPercent(bps, 2)} of balance, ${formatUsdc(amountForBps(balance.data, bps), { maxDecimals: 2, grouping: true })} USDC`
-      : `${bpsToPercent(bps, 2)} of balance`;
+      ? `${fmt.percent(bps, { decimals: 2 })} of balance, ${fmt.usdc(amountForBps(balance.data, bps), { maxDecimals: 2, grouping: true })} USDC`
+      : `${fmt.percent(bps, { decimals: 2 })} of balance`;
   const onAmountTyped = (text: string) => {
     setAmountText(text);
     if (balance.data === undefined) return;
@@ -224,11 +226,11 @@ function CopyTradeContent() {
       setAmountError(null);
       return;
     }
-    const parsed = tryParseUsdc(text);
+    const parsed = fmt.tryParseAmount(text);
     if (parsed === null) {
       setAmountError("Enter an amount like 10 or 2.5, with up to 7 decimal places.");
     } else if (parsed > balance.data) {
-      setAmountError(`That is more than your balance of ${formatUsdc(balance.data, { maxDecimals: 2, grouping: true })} USDC.`);
+      setAmountError(`That is more than your balance of ${fmt.usdc(balance.data, { maxDecimals: 2, grouping: true })} USDC.`);
     } else {
       setAmountError(null);
       setAllocationBps(bpsForAmount(balance.data, parsed));
@@ -368,7 +370,7 @@ function CopyTradeContent() {
 
       setStatusMessage(
         (result.durable ? "Trade done; recording will retry automatically. " : "Trade done; browser storage is unavailable, so keep this tab open to finish recording. ") +
-        `You received ${formatUsdc(result.sharesOut, { maxDecimals: 2 })} ${side.toUpperCase()} shares.` +
+        `You received ${fmt.usdc(result.sharesOut, { maxDecimals: 2 })} ${side.toUpperCase()} shares.` +
           (result.txHash ? ` Transaction ${result.txHash.slice(0, 10)}…` : ""),
       );
       const explorerUrl = result.txHash ? explorerTx(result.txHash) : null;
@@ -471,7 +473,7 @@ function CopyTradeContent() {
               <div className="flex justify-between items-end flex-wrap gap-2">
                 <label className="font-label-caps text-label-caps text-on-surface-variant uppercase text-[10px]">Amount to copy</label>
                 <span className="font-data-mono text-data-mono text-primary font-bold text-xs sm:text-sm">
-                  {amountRaw !== null ? <Ltr>{`${formatUsdc(amountRaw, { maxDecimals: 2, minDecimals: 2, grouping: true })} USDC`}</Ltr> : isConnected ? "loading balance…" : "connect a wallet"}
+                  {amountRaw !== null ? <Ltr>{`${fmt.usdc(amountRaw, { maxDecimals: 2, minDecimals: 2, grouping: true })} USDC`}</Ltr> : isConnected ? "loading balance…" : "connect a wallet"}
                   {choice && choice.limitedBy !== "none" && (
                     <span className="block text-[10px] font-normal text-on-surface-variant">limited by your {choice.limitedBy}</span>
                   )}
@@ -565,10 +567,10 @@ function CopyTradeContent() {
                   inputMode="decimal"
                   autoComplete="off"
                   disabled={balance.data === undefined || (isWatching && !isConnected)}
-                  value={amountFocused ? amountText : amountRaw !== null ? formatUsdc(amountRaw) : ""}
+                  value={amountFocused ? amountText : amountRaw !== null ? fmt.usdc(amountRaw) : ""}
                   placeholder={balance.data === undefined ? "Balance not loaded" : "0"}
                   onFocus={() => {
-                    setAmountText(amountRaw !== null ? formatUsdc(amountRaw) : "");
+                    setAmountText(amountRaw !== null ? fmt.usdc(amountRaw) : "");
                     setAmountFocused(true);
                   }}
                   onBlur={() => {
@@ -606,9 +608,9 @@ function CopyTradeContent() {
                 <div className="text-end font-data-mono text-xs">
                   {quote.data !== undefined && minShares !== null ? (
                     <>
-                      <span className="text-on-surface font-bold">{formatUsdc(quote.data, { maxDecimals: 2 })}</span>
+                      <span className="text-on-surface font-bold">{fmt.usdc(quote.data, { maxDecimals: 2 })}</span>
                       <span className="block text-[10px] text-on-surface-variant">
-                        at least {formatUsdc(minShares, { maxDecimals: 2 })} after slippage
+                        at least {fmt.usdc(minShares, { maxDecimals: 2 })} after slippage
                         {fees && (
                           <span
                             className="block text-[10px] text-on-surface-variant mt-1"
@@ -643,10 +645,10 @@ function CopyTradeContent() {
               {localQuote && estimateSideBps !== null && (
                 <div className="p-4 border border-outline-variant rounded-lg bg-white space-y-2">
                   <div className="flex flex-wrap gap-x-4 gap-y-1 font-data-mono text-xs text-on-surface-variant">
-                    <span>Agent estimate <span className="font-bold text-on-surface">{bpsToPercent(estimateSideBps)}</span></span>
-                    <span>Your avg price <span className="font-bold text-on-surface">{bpsToPercent(localQuote.avgPriceBps)}</span></span>
+                    <span>Agent estimate <span className="font-bold text-on-surface">{fmt.percent(estimateSideBps)}</span></span>
+                    <span>Your avg price <span className="font-bold text-on-surface">{fmt.percent(localQuote.avgPriceBps)}</span></span>
                     <span className={localQuote.edgeAfterBps > 0n ? "font-bold text-secondary" : "font-bold text-error"}>
-                      Remaining edge {formatEdge(localQuote.edgeAfterBps)}
+                      Remaining edge {formatEdge(localQuote.edgeAfterBps, fmt)}
                     </span>
                   </div>
                   {maxForEdge !== null && amountRaw !== null && maxForEdge > 0n && maxForEdge < amountRaw && (
@@ -655,10 +657,10 @@ function CopyTradeContent() {
                       className="text-xs text-primary underline"
                       onClick={() => {
                         setSizingKind("fixed");
-                        setFixedInput(formatUsdc(maxForEdge, { maxDecimals: 2 }));
+                        setFixedInput(fmt.usdc(maxForEdge, { maxDecimals: 2 }));
                       }}
                     >
-                      Use max with edge ({formatUsdc(maxForEdge, { maxDecimals: 2 })} USDC keeps at least {formatEdge(MIN_EDGE_WARN_BPS)})
+                      Use max with edge ({fmt.usdc(maxForEdge, { maxDecimals: 2 })} USDC keeps at least {formatEdge(MIN_EDGE_WARN_BPS, fmt)})
                     </button>
                   )}
                   {quote.data !== undefined && quote.data !== localQuote.sharesOut && (
@@ -681,7 +683,7 @@ function CopyTradeContent() {
                     checked={acknowledgeThinEdge}
                     onChange={(e) => setAcknowledgeThinEdge(e.target.checked)}
                   />
-                  <span>The remaining edge is only {formatEdge(localQuote.edgeAfterBps)}. I still want to copy this trade.</span>
+                  <span>The remaining edge is only {formatEdge(localQuote.edgeAfterBps, fmt)}. I still want to copy this trade.</span>
                 </label>
               )}
               {isConnected && isUnfunded && (
