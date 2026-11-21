@@ -22,6 +22,7 @@ import { ConsentBanner } from "@/components/consent-banner";
 import { ErrorReportingInit } from "@/components/observability/ErrorReportingInit";
 import { DirectionProvider } from "@/components/layout/DirectionProvider";
 import { dirForLocale, type Dir } from "@/lib/i18n/direction";
+import { I18nProvider } from "@/lib/i18n/provider";
 
 const geistSans = Geist({
   subsets: ["latin"],
@@ -71,6 +72,7 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col font-body-md text-on-surface">
         <DirectionProvider dir={dir}>
+        <I18nProvider>
         <a
           href="#main-content"
           className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:start-4 focus:z-[100] focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-md focus:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary-foreground font-label-caps"
@@ -107,6 +109,7 @@ export default function RootLayout({
           </ViewedAddressProvider>
         </WalletProvider>
         </PwaRegistrar>
+        </I18nProvider>
         </DirectionProvider>
       </body>
     </html>

@@ -1,40 +1,45 @@
+import type { MessageKey } from "@/lib/i18n";
+
 export interface NavItem {
+  /** English label; surfaces outside the migrated navbar (command palette, mobile nav) still read it. */
   label: string;
+  /** Catalog key the navbar renders through `t()`. */
+  labelKey: MessageKey;
   href: string;
-  children?: { label: string; href: string }[];
+  children?: { label: string; labelKey: MessageKey; href: string }[];
   /** Permission required to view this item in navigation (RBAC) */
   permission?: "admin.read";
 }
 
 export const NAV_ITEMS: readonly NavItem[] = [
   {
-    label: "Markets",
+    label: "Markets", labelKey: "nav.markets",
     href: "/markets",
     children: [
-      { label: "Live Terminal", href: "/markets/terminal" },
-      { label: "Active Market Detail", href: "/market" },
-      { label: "FPMM Explainer", href: "/learn/fpmm" },
+      { label: "Live Terminal", labelKey: "nav.liveTerminal", href: "/markets/terminal" },
+      { label: "Active Market Detail", labelKey: "nav.activeMarketDetail", href: "/market" },
+      { label: "FPMM Explainer", labelKey: "nav.fpmmExplainer", href: "/learn/fpmm" },
     ],
   },
   {
-    label: "Reasoning",
+    label: "Reasoning", labelKey: "nav.reasoning",
     href: "/reasoning",
   },
   {
-    label: "Portfolio",
+    label: "Portfolio", labelKey: "nav.portfolio",
     href: "/portfolio",
     children: [
-      { label: "Active Positions", href: "/portfolio" },
-      { label: "Analytics", href: "/portfolio/analytics" },
-      { label: "Portfolio & Assets", href: "/portfolio/wallets" },
+      { label: "Active Positions", labelKey: "nav.activePositions", href: "/portfolio" },
+      { label: "Analytics", labelKey: "nav.analytics", href: "/portfolio/analytics" },
+      { label: "Portfolio & Assets", labelKey: "nav.portfolioAssets", href: "/portfolio/wallets" },
     ],
   },
   {
-    label: "Stats",
+    label: "Stats", labelKey: "nav.stats",
     href: "/stats",
   },
   {
-    label: "Admin",
+    label: "Admin", labelKey: "nav.admin",
     href: "/admin",
     permission: "admin.read",
   },

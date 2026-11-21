@@ -65,6 +65,39 @@ const rtlPlugin = {
   },
 };
 
+/** Words that are product, asset or key names and are never translated. */
+const UNTRANSLATED_TEXT = /^(?:OracleDesk|USDC|XLM|⌘K)$/;
+const TRANSLATABLE_ATTRIBUTES = new Set(["aria-label", "title", "placeholder", "alt"]);
+
+const i18nPlugin = {
+  rules: {
+    "no-literal-text": {
+      meta: { type: "problem", schema: [] },
+      create(context) {
+        const message =
+          "User-facing text in migrated files must come from t() (lib/i18n). Asset codes and the product name are exempt; see docs/i18n.md.";
+        const hasWords = (text) => /[A-Za-z]{2,}/.test(text) && !UNTRANSLATED_TEXT.test(text.trim());
+        return {
+          JSXText(node) {
+            if (hasWords(node.value)) context.report({ node, message });
+          },
+          JSXAttribute(node) {
+            if (
+              node.name.type === "JSXIdentifier" &&
+              TRANSLATABLE_ATTRIBUTES.has(node.name.name) &&
+              node.value?.type === "Literal" &&
+              typeof node.value.value === "string" &&
+              hasWords(node.value.value)
+            ) {
+              context.report({ node, message });
+            }
+          },
+        };
+      },
+    },
+  },
+};
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -157,6 +190,12 @@ const eslintConfig = defineConfig([
     rules: {
       "rtl-logical/no-physical-classes": "error",
     },
+  },
+  {
+    // Surfaces migrated to the i18n catalog: new English literals fail lint.
+    files: ["components/layout/Navbar.tsx", "components/layout/WalletDropdown.tsx"],
+    plugins: { i18n: i18nPlugin },
+    rules: { "i18n/no-literal-text": "error" },
   },
 ]);
 

@@ -22,6 +22,7 @@ import { explorerTx, NETWORK_LABEL } from "@/lib/stellar/config";
 import { parseRecordId } from "@/lib/validation/ids";
 import { formatXlm, minOut, probabilityToBps, BPS } from "@/lib/stellar/units";
 import { useFormat, type Formatters } from "@/lib/format/useFormat";
+import { useTranslations } from "@/lib/i18n/provider";
 import { chooseCollateral, maxCollateralForEdge, quoteCopy, type CopyMarket, type CopyQuote, type SizingMode } from "@/lib/stellar/quote";
 import type { OutcomeTag } from "@/lib/stellar/clients";
 import { TxPhase } from "@/lib/stellar/tx-lifecycle";
@@ -140,6 +141,7 @@ function CopyTradeContent() {
   const { viewed, isWatching } = useViewedAddress();
   const dir = useDirection();
   const fmt = useFormat();
+  const t = useTranslations();
   const balance = useUsdcBalance(address);
   const balanceState = useUsdcBalanceState(address);
   const ledger = useLedgerNow();
@@ -217,8 +219,8 @@ function CopyTradeContent() {
   // amount shown after editing can be slightly below what was typed.
   const allocationValueText = (bps: number) =>
     balance.data !== undefined
-      ? `${fmt.percent(bps, { decimals: 2 })} of balance, ${fmt.usdc(amountForBps(balance.data, bps), { maxDecimals: 2, grouping: true })} USDC`
-      : `${fmt.percent(bps, { decimals: 2 })} of balance`;
+      ? t("trade.copy.sliderValueText", { percent: fmt.percent(bps, { decimals: 2 }), amount: fmt.usdc(amountForBps(balance.data, bps), { maxDecimals: 2, grouping: true }) })
+      : t("trade.copy.sliderValueTextNoBalance", { percent: fmt.percent(bps, { decimals: 2 }) });
   const onAmountTyped = (text: string) => {
     setAmountText(text);
     if (balance.data === undefined) return;
@@ -228,9 +230,9 @@ function CopyTradeContent() {
     }
     const parsed = fmt.tryParseAmount(text);
     if (parsed === null) {
-      setAmountError("Enter an amount like 10 or 2.5, with up to 7 decimal places.");
+      setAmountError(t("trade.copy.amountInvalid"));
     } else if (parsed > balance.data) {
-      setAmountError(`That is more than your balance of ${fmt.usdc(balance.data, { maxDecimals: 2, grouping: true })} USDC.`);
+      setAmountError(t("trade.copy.amountOverBalance", { balance: fmt.usdc(balance.data, { maxDecimals: 2, grouping: true }) }));
     } else {
       setAmountError(null);
       setAllocationBps(bpsForAmount(balance.data, parsed));
@@ -273,32 +275,30 @@ function CopyTradeContent() {
 
   const handleConfirm = async () => {
     if (!isConnected || !address) {
-      setStatusMessage("Connect your wallet to confirm the copy trade.");
+      setStatusMessage(t("trade.copy.connectToConfirm"));
       void openModal();
       return;
     }
     if (isWrongNetwork) {
-      setStatusMessage(`Switch your wallet to ${NETWORK_LABEL} to place this trade.`);
+      setStatusMessage(t("trade.copy.switchNetwork", { network: NETWORK_LABEL }));
       return;
     }
     if (!trace || !side) {
       setStatusMessage(
-        !trace
-          ? "There's no reasoning trace to copy, so there's no side to take."
-          : "This trace shows no edge, so there's no trade to copy.",
+        !trace ? t("trade.copy.noTrace") : t("trade.copy.noEdge"),
       );
       return;
     }
     if (!onChainMarketId || !market) {
-      setStatusMessage("This market isn't on-chain yet, so it can't be traded.");
+      setStatusMessage(t("trade.copy.notOnChain"));
       return;
     }
     if (!onChainMarket.data) {
-      setStatusMessage("Checking the on-chain market and ledger time…");
+      setStatusMessage(t("trade.copy.checkingMarket"));
       return;
     }
     if (!marketCanTrade) {
-      setStatusMessage("This market is closed or too close to its deadline to safely place a trade.");
+      setStatusMessage(t("trade.copy.marketClosed"));
       return;
     }
     if (!trustlineReady) {
@@ -312,7 +312,7 @@ function CopyTradeContent() {
       return;
     }
     if (!amountRaw || amountRaw <= 0n) {
-      setStatusMessage("Choose an allocation greater than zero. You may need USDC in your wallet first.");
+      setStatusMessage(t("trade.copy.zeroAllocation"));
       return;
     }
 
@@ -331,7 +331,7 @@ function CopyTradeContent() {
         freshMarket.market.status.tag !== "Open" ||
         BigInt(Math.floor(freshLedgerNow)) + BigInt(SAFETY_MARGIN_S + MIN_TX_TIMEOUT_S) >= freshMarket.market.close_time
       ) {
-        setStatusMessage("This market is closed or too close to its deadline to safely place a trade.");
+        setStatusMessage(t("trade.copy.marketClosed"));
         return;
       }
 
@@ -548,11 +548,11 @@ function CopyTradeContent() {
               {choice?.unavailable && sizingKind === "mirror" && <p className="text-[11px] text-error">{choice.unavailable}</p>}
               {sizingKind === "percent" && (
               <>
-              <span id="allocation-slider-label" className="block text-[11px] text-on-surface-variant">Share of your USDC balance</span>
+              <span id="allocation-slider-label" className="block text-[11px] text-on-surface-variant">{t("trade.copy.allocationLabel")}</span>
               <BpsSlider
                 id="allocation-slider"
                 labelledBy="allocation-slider-label"
-                label="Share of your USDC balance"
+                label={t("trade.copy.allocationLabel")}
                 value={allocationBps}
                 onValueChange={setAllocationBps}
                 dir={dir}
@@ -560,7 +560,7 @@ function CopyTradeContent() {
                 describedBy="allocation-amount-help"
               />
               <div className="space-y-1">
-                <label htmlFor="allocation-amount" className="text-[11px] text-on-surface-variant">Amount (USDC)</label>
+                <label htmlFor="allocation-amount" className="text-[11px] text-on-surface-variant">{t("trade.copy.amountLabel")}</label>
                 <input
                   id="allocation-amount"
                   type="text"
@@ -584,9 +584,7 @@ function CopyTradeContent() {
                 />
                 {amountError && <p id="allocation-amount-error" className="text-[11px] text-error">{amountError}</p>}
                 <p id="allocation-amount-help" className="text-[11px] text-on-surface-variant">
-                  {balance.data === undefined
-                    ? "Connect a wallet with a loaded USDC balance to type an exact amount. The slider still sets a share of your balance."
-                    : "Typing an amount sets the closest share of your balance that does not exceed it. The trade uses the amount shown here."}
+                  {balance.data === undefined ? t("trade.copy.amountDisconnected") : t("trade.copy.amountHelp")}
                 </p>
               </div>
               </>

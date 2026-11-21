@@ -47,6 +47,7 @@ node scripts/spec-diff.mjs --base origin/develop # report contract interface cha
 npm run typecheck
 npm run lint
 npm run check:docs
+npm run i18n:check       # message catalogs: ICU syntax, key parity, unused keys, typed params
 npm test
 npm run test:scripts
 npm run build
