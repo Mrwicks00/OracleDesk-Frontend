@@ -15,10 +15,13 @@ import { IntegrityBanner } from "@/components/layout/IntegrityBanner";
 import { BuildIdentityBanner } from "@/components/layout/BuildIdentityBanner";
 import { CopyTradeReconciler } from "@/components/copy-trade/CopyTradeReconciler";
 import { ViewedAddressProvider } from "@/lib/hooks/useViewedAddress";
-import { IntegrityBanner } from "@/components/layout/IntegrityBanner";
 import { ViewingBanner } from "@/components/layout/ViewingBanner";
 import { WebVitals } from "@/app/web-vitals";
 import { CommandPalette } from "@/components/command-palette/CommandPalette";
+import { ConsentBanner } from "@/components/consent-banner";
+import { ErrorReportingInit } from "@/components/observability/ErrorReportingInit";
+import { DirectionProvider } from "@/components/layout/DirectionProvider";
+import { dirForLocale, type Dir } from "@/lib/i18n/direction";
 
 const geistSans = Geist({
   subsets: ["latin"],
