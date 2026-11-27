@@ -10,6 +10,7 @@ import { usePriceHistory } from "@/lib/hooks/usePriceHistory";
 import { DepthChart } from "@/components/charts/depth-chart";
 import { DemoBadge } from "@/components/ui/demo-badge";
 import { SafeText } from "@/components/safe-text";
+import { asDemoId, parseMarketPageParams, routes } from "@/lib/routes";
 // Issue #231: lazy-load committee panel for markets using ResolutionSpec::Committee
 import dynamic from "next/dynamic";
 const CommitteePanel = dynamic(() => import("@/components/market/committee-panel").then((m) => ({ default: m.CommitteePanel })), { ssr: false, loading: () => null });
@@ -50,14 +51,14 @@ const MarketHeader = () => {
       {/* Quick Links */}
       <div className="flex flex-wrap gap-2">
         <Link
-          href="/market/9204/trace-history"
+          href={routes.marketTraceHistory(asDemoId("9204"))}
           className="px-4 py-2 bg-surface-container border border-outline-variant text-on-surface rounded font-label-caps text-label-caps hover:bg-surface-container-high transition-colors flex items-center gap-2"
         >
           <Icon name="history" className="text-base" />
           Trace History
         </Link>
         <Link
-          href="/market/9204/trades"
+          href={routes.marketTrades(asDemoId("9204"))}
           className="px-4 py-2 bg-surface-container border border-outline-variant text-on-surface rounded font-label-caps text-label-caps hover:bg-surface-container-high transition-colors flex items-center gap-2"
         >
           <Icon name="link" className="text-base" />
@@ -73,7 +74,8 @@ const MarketHeader = () => {
 // useSearchParams can prerender without bailing out the whole page.
 const MarketPriceSection = () => {
   const searchParams = useSearchParams();
-  const onChainId = searchParams.get("onChainId");
+  const parsed = parseMarketPageParams(searchParams);
+  const onChainId = parsed.ok ? parsed.onChainId : null;
   const { points } = usePriceHistory(onChainId);
   return <PriceChart points={points} onChainMarketId={onChainId} />;
 };
@@ -236,7 +238,7 @@ const TradeExecution = () => {
             BUY YES
           </button>
           <Link 
-            href="/copy-trade?marketId=MKT-9204"
+            href={routes.copyTrade({ marketId: asDemoId("MKT-9204") })}
             className="w-full bg-primary-container text-on-primary-container py-3 rounded-xl font-label-caps text-label-caps flex items-center justify-center gap-2 hover:opacity-90 transition-opacity"
           >
             <Icon name="content_copy" className="text-[18px]" />

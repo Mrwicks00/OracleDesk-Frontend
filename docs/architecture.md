@@ -520,3 +520,129 @@ Every origin-scoped store is classified and registered with `lib/storage/quota.t
 - `disposable` stores are evicted LRU under a `navigator.locks` Web Lock named `oracledesk-storage-evict`.
 - `navigator.storage.persist()` is requested after the first successful paid action, rate-limited to once per 7 days.
 - `assertDurableStorage(kind)` runs before x402 signing, daily-pass transfers, and copy-trade signing; it refuses with a user-facing error when evidence cannot be written durably.
+
+## On-Chain Storage TTL & Proactive Extension (#304)
+
+Soroban ledger entries (`Market` and `Position` persistent entries) have a time-to-live (TTL) measured in ledger sequences. When an entry's TTL expires, it becomes archived: it cannot be read or written until restored via a `RestoreFootprint` operation.
+
+### TTL Model and Estimation (`lib/stellar/ttl.ts`)
+
+- **Ledger Sequence Arithmetic**: Expiries are calculated strictly by ledger difference (`liveUntilLedgerSeq - latestLedger`). No `Date.now()` or client wall-clock arithmetic is used for chain time.
+- **Speed Variance & Uncertainty**: Expiry wall-clock estimates use mean, minimum, and maximum ledger speeds sampled from `ledgerClock` (defaulting to 5s mean, 4s min, 7s max). The UI shows ranges (e.g. `~30 days`, `estimated 28–34 days`) rather than misleading calendar dates.
+- **Missing Ledger TTL**: If `liveUntilLedgerSeq` is absent from an RPC response, the entry is labeled `unknown`, never assumed `safe`.
+
+### Proactive Extension vs. Contract Bumps
+
+- Interacting with a market (trading) extends the `Market` entry under market-core's TTL policy, but does **not** touch other users' `Position` entries.
+- Users who buy and hold long-dated markets risk position archival if unaddressed.
+- `ExtendFootprintTTL` requires no contract authorization; the holder signs only for the transaction fee. All target keys are declared in the **read-only** footprint.
+- Horizon targets are clamped to `ConfigSettingStateArchival.maxEntryTtl` queried from the network, and no-op keys already surviving past the target are filtered out to prevent unnecessary fee burn.
+- Extension transactions are batched with binary-split fallback when simulating against Soroban footprint resource limits.
+
+### Archival & Proactive Restoration
+
+- If an entry archives before redemption or interaction, it is surfaced as "Needs restore" in `/portfolio`.
+- `prepareRestore` places the target keys in the **read-write** footprint and submits a `RestoreFootprint` operation.
+- In `useRedeemAll`, archived entries are offered for restoration before attempting redemption, avoiding footprint simulation failures.
+
+### Non-Forfeiture Disclaimer
+
+Proactively extending an entry's storage lifetime keeps the entry live on ledger, but does **not** alter the contract's `close_time`, `settlement`, or `redeem_deadline`. Unredeemed shares remain subject to market forfeiture rules after market settlement horizons elapse.
+
+## Forms (#306)
+
+OracleDesk forms manage financial operations and access limits. To ensure WCAG 2.2 Level AAA compliance and prevent screen-reader errors, form error handling is standardized through `components/ui/form-errors.tsx` and `lib/forms/error-map.ts`.
+
+### Primitives
+
+- **`useFormErrors<K>()`**: Hook managing stable element IDs (`ids[key].input`, `ids[key].error`, `ids[key].hint`), field errors, form-level errors, touched state, blur handlers, and submission attempts.
+- **`<ErrorSummary>`**: Rendered with `tabIndex={-1}` and focused on failed submit attempts. It lists each error as a jump link (`<a href="#inputId">`) that invokes `.focus()` on the corresponding target input.
+- **`<FieldError>`**: Renders inline error messages. The container div is always rendered in the DOM (even when empty) so `aria-describedby` never references dangling or missing IDs.
+- **`<FormStatus>`**: Backed by a single `<LiveRegion>` per form to announce asynchronous events politely.
+
+### Announcement Rules
+
+1. **No Silent Submit Disables**: Form submit buttons are not disabled due to validation errors. Submitting an invalid form moves focus to `<ErrorSummary>`.
+2. **Blur-First Validation**: Inline errors appear only after field blur or after a submit attempt, avoiding noisy announcements during keystrokes.
+3. **No Double Announcements**: Inline `<FieldError>` components are not live regions. Only `<ErrorSummary>` (on failed submit) and `<FormStatus>` (on settled async events) speak.
+4. **Settled-Only Status**: Asynchronous validation (quotes, server checks) announces only once per settled result via `announceSettled(key, message)`, never on intermediate pending states.
+
+### Error Mapping Priority (`mapErrorToField`)
+
+When contract or API operations fail, `mapErrorToField` resolves the failure into a field-targeted or form-level error with the following precedence:
+1. **Contract error code** (e.g. `SlippageExceeded` → `slippage`, `InsufficientBalance` → `amount`).
+2. **DescribedErrorKind** (e.g. `insufficient-balance` → `amount`, `no-trustline` → form-level action).
+3. **ApiError code** (e.g. `ALLOWANCE_DAILY_LIMIT` → `cap`, `TRACE_LOCKED` → `amount`).
+4. **Form-level fallback** for unknown or general network errors.
+
+## Agent Registry Lifecycle & Moderation (#307)
+
+The reasoning registry contract (`CONTRACTS.reasoningRegistry`) tracks AI agent authorization and verifiable reasoning traces.
+
+### Lifecycle State Machine (`lib/stellar/registry-lifecycle.ts`)
+
+Agents transition through four distinct lifecycle states:
+- **`Unregistered`**: Not registered in the contract.
+- **`Active`**: Registered and authorized to publish traces.
+- **`Retired`**: Past traces remain valid, but future publishing is disabled.
+- **`Revoked`**: Terminal state. Retroactively invalidates all traces published at or after `effective_from`.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Unregistered
+    Unregistered --> Active: register_agent()
+    Active --> Retired: retire_agent()
+    Retired --> Active: reactivate_agent()
+    Active --> Revoked: revoke_agent(effective_from, reason)
+    Retired --> Revoked: revoke_agent(effective_from, reason)
+    Revoked --> Revoked: revoke_agent(earlier_effective_from)
+```
+
+### Action Restrictions (`allowedActions`)
+
+| Current State | Allowed Actions | Disallowed Actions |
+|---|---|---|
+| `Unregistered` | `register` | `retire`, `reactivate`, `revoke` |
+| `Active` | `retire`, `revoke` | `register`, `reactivate` |
+| `Retired` | `reactivate`, `revoke` | `register`, `retire` |
+| `Revoked` | `revoke` (adjust effective_from) | `register`, `retire`, `reactivate` |
+
+### Revocation Constraints (`validateRevoke`)
+
+- Requires `registered_at <= effective_from <= ledger_now`.
+- The console simulates retroactive impact via `useRevokeImpact`, estimating how many published traces in the event retention window will fail verification.
+- Destructive actions (`retire`, `revoke`) require typed confirmation of the address suffix.
+
+### Trace Moderation & Verdict Precedence (`traceVerdictLocal`)
+
+Trace trustworthiness is determined by evaluating rules in strict priority order:
+1. **Hash Integrity**: Stored on-chain `trace_hash` must match the retrieved content hash (`HashMismatch`).
+2. **Moderation Flags**: An active moderator flag overrides validity (`Flagged: reason`). History is capped at `FLAG_HISTORY_CAP = 16` entries.
+3. **Agent Revocation**: If the publishing agent is `Revoked` and `published_at >= effective_from`, the trace is untrusted (`AgentRevokedAfter: effective_from`).
+4. **Valid**: All checks pass (`Valid`).
+
+
+## Time limits
+
+Transaction and display timing is split between limits the user can adjust and limits the protocol imposes.
+
+| Limit | Source | Adjustable | Value |
+| --- | --- | --- | --- |
+| Signing window, standard | App (`TIMING_LIMITS.standard`) | Yes, in `/settings` | 60 s |
+| Signing window, extended | App (`TIMING_LIMITS.extended`) | Yes, in `/settings` | 300 s |
+| Warning before expiry | App (`WARN_BEFORE_EXPIRY_S`) | No | 20 s |
+| Market close | Protocol | No | Clamped with a 10 s safety margin |
+| x402 authorization | Protocol (`expirationLedger`) | No | Fixed ledger |
+| Multisig session | Protocol (`auth_expiration`) | No | Fixed ledger |
+
+Every single-signer write derives its deadline from ledger time (`getLedgerNow()`), never from the device clock. The deadline is re-checked immediately before the wallet prompt. A signature from a superseded attempt ("Need more time") is discarded and never submitted. Extended time bounds increase exposure to price movement; `min_shares_out` still bounds slippage.
+
+Auto-updating regions (home ticker, trade tape) can be paused with a button, and pause automatically while focus or the pointer is inside them (`lib/a11y/pausable.ts`).
+
+## Trace feed filters and pagination
+
+`/reasoning` combines two kinds of filter. Server-side parameters (`agentType`, backend `marketId`) go to `GET /traces`. Client-side predicates (`onChain`, `verification`, `held`) are applied to each loaded page, and their state lives in the URL (`type`, `market`, `onchain`, `v`, `held`; see `lib/traces/feed-params.ts`).
+
+Pages are fetched automatically only while fewer than 20 items match, and at most 5 pages per filter change or "Load more" press (`lib/hooks/useFilteredTraceFeed.ts`). The header and the live summary report matched against loaded counts. Saved views are per wallet in `localStorage` (`oracledesk:trace-views:v1:<wallet>`, `lib/traces/saved-views.ts`).
+
+Not yet implemented: filters on the agent address and publish time, which need registry facts from the chain, and time-budgeted auto-fetch.

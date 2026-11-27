@@ -125,7 +125,11 @@ export function useCopyTrade() {
         if (readOutbox(trader).filter((entry) => !isTerminal(entry) && !entry.dismissed).length >= MAX_OUTBOX_ENTRIES) {
           throw new Error("Finish or dismiss a pending copy trade before starting another.");
         }
-        const intent = await initiateCopyTrade({ traceId: input.traceId, marketId: input.backendMarketId, amountRaw: input.collateralIn.toString() }, { expectScope: scope, signal: ticket?.signal });
+        const idempotencyKey = crypto.randomUUID();
+        const intent = await initiateCopyTrade(
+          { traceId: input.traceId, marketId: input.backendMarketId, amountRaw: input.collateralIn.toString() },
+          { expectScope: scope, signal: ticket?.signal, idempotencyKey },
+        );
         ticket?.assertCurrent();
         const payload = intent.transactionPayload;
         const entry: OutboxEntry = {

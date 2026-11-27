@@ -4,10 +4,13 @@ import { Icon, type IconName } from "@/components/ui/icon";
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useWallet } from "@/lib/contexts/WalletContext";
+import { TimingSettings } from "@/components/settings/timing-settings";
 import { usePaymentEvents, useSetSpendingAllowance, useSpendingAllowance } from "@/lib/hooks/useTraces";
 import { apiNumberToRaw, computeTodayUsage, rawToApiNumber, validateAllowance } from "@/lib/format/allowance";
 import { formatUsdc, tryParseUsdc } from "@/lib/stellar/units";
 import { UsdcInput } from "@/components/ui/usdc-input";
+import { useFormErrors, ErrorSummary, FormStatus } from "@/components/ui/form-errors";
+import { mapErrorToField } from "@/lib/forms/error-map";
 import { NETWORK_LABEL } from "@/lib/stellar/config";
 import { shortAddress } from "@/lib/stellar/units";
 import { getReportingConsent, isReportingConfigured, setReportingConsent } from "@/lib/observability/report";
@@ -116,21 +119,58 @@ export default function SettingsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [errorReports, setErrorReports] = useState(() => getReportingConsent());
   const [analytics, setAnalytics] = useState(() => getAnalyticsConsent() === "granted");
+
+  const form = useFormErrors(["daily", "perTrace"] as const);
+
   // Sync the form with the fetched allowance once; the effect mirrors external server state.
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { if (allowance.data) { setDaily(formatUsdc(apiNumberToRaw(allowance.data.dailyLimit).raw)); setPerTrace(formatUsdc(apiNumberToRaw(allowance.data.perTraceLimit).raw)); } }, [allowance.data]);
+  useEffect(() => {
+    if (allowance.data) {
+      setDaily(formatUsdc(apiNumberToRaw(allowance.data.dailyLimit).raw));
+      setPerTrace(formatUsdc(apiNumberToRaw(allowance.data.perTraceLimit).raw));
+    }
+  }, [allowance.data]);
+
   const dailyRaw = tryParseUsdc(daily);
   const perTraceRaw = tryParseUsdc(perTrace);
-  const errors = useMemo(() => validateAllowance(dailyRaw, perTraceRaw), [dailyRaw, perTraceRaw]);
   const usage = computeTodayUsage(payments.data ?? []);
   const usageLimit = dailyRaw ?? 0n;
   const usagePercent = usageLimit > 0n ? Math.min(100, Number((usage * 100n) / usageLimit)) : 0;
+
   async function submit() {
-    if (Object.keys(errors).length || dailyRaw === null || perTraceRaw === null) return;
-    const dailyApi = rawToApiNumber(dailyRaw); const perTraceApi = rawToApiNumber(perTraceRaw);
+    setMessage(null);
+    form.clearStatus();
+    const valid = form.attemptSubmit(() => {
+      const d = tryParseUsdc(daily);
+      const p = tryParseUsdc(perTrace);
+      const v = validateAllowance(d, p);
+      const res: Partial<Record<"daily" | "perTrace", string>> = {};
+      if (v.daily) res.daily = v.daily;
+      if (v.perTrace) res.perTrace = v.perTrace;
+      return res;
+    });
+
+    if (!valid || dailyRaw === null || perTraceRaw === null) return;
+    const dailyApi = rawToApiNumber(dailyRaw);
+    const perTraceApi = rawToApiNumber(perTraceRaw);
     if (!dailyApi.ok || !perTraceApi.ok) return;
-    try { await save.mutateAsync({ dailyLimit: dailyApi.value, perTraceLimit: perTraceApi.value, currency: "USDC" }); setMessage("Your trace spending limits were saved."); }
-    catch (error) { setMessage(error instanceof Error ? error.message : "Could not save your limits."); }
+
+    try {
+      await save.mutateAsync({ dailyLimit: dailyApi.value, perTraceLimit: perTraceApi.value, currency: "USDC" });
+      form.announceSettled("save", "Limits saved");
+      setMessage("Your trace spending limits were saved.");
+    } catch (error) {
+      const mapped = mapErrorToField(error, {
+        DAILY_LIMIT_EXCEEDED: "daily",
+        PER_TRACE_LIMIT_EXCEEDED: "perTrace",
+      });
+      if ("field" in mapped.target) {
+        form.setErrors({ [mapped.target.field]: mapped.message });
+      } else {
+        form.setFormError(mapped.message);
+      }
+      setMessage(mapped.message);
+    }
   }
   return (
     <main className="mx-auto w-full max-w-container-max-width flex-grow px-gutter pb-20 pt-8">
@@ -173,15 +213,37 @@ export default function SettingsPage() {
                 ? <div><p className="mb-3 text-sm text-on-surface-variant">Sign in to view and change your limits.</p><button onClick={() => void wallet.ensureSession()} className="rounded bg-primary px-4 py-2 text-white">Sign in</button></div>
                 : <div className="space-y-5">
                     <p className="text-sm text-on-surface-variant">Payments are blocked until you set a positive daily and per-trace limit.</p>
+                    <ErrorSummary
+                      errors={form.errors}
+                      formError={form.formError}
+                      ids={form.ids}
+                      labels={{ daily: "Daily limit", perTrace: "Per-trace limit" }}
+                      summaryRef={form.summaryRef}
+                    />
                     <div className="grid gap-4 sm:grid-cols-2">
-                      <UsdcInput label="Daily limit (USDC)" value={daily} onValueChange={(_, text) => setDaily(text)} error={errors.daily} />
-                      <UsdcInput label="Per-trace limit (USDC)" value={perTrace} onValueChange={(_, text) => setPerTrace(text)} error={errors.perTrace} />
+                      <UsdcInput
+                        id={form.ids.daily.input}
+                        label="Daily limit (USDC)"
+                        value={daily}
+                        onValueChange={(_, text) => setDaily(text)}
+                        onBlur={() => form.handleBlur("daily")}
+                        error={form.errors.daily}
+                      />
+                      <UsdcInput
+                        id={form.ids.perTrace.input}
+                        label="Per-trace limit (USDC)"
+                        value={perTrace}
+                        onValueChange={(_, text) => setPerTrace(text)}
+                        onBlur={() => form.handleBlur("perTrace")}
+                        error={form.errors.perTrace}
+                      />
                     </div>
                     <div>
                       <div className="mb-1 flex justify-between text-xs text-on-surface-variant"><span>Used today</span><span>{formatUsdc(usage)}{usageLimit ? ` of ${formatUsdc(usageLimit)} USDC` : " USDC"}</span></div>
                       <div className="h-2 overflow-hidden rounded bg-surface-container"><div className="h-full bg-primary" style={{ width: `${usagePercent}%` }} /></div>
                     </div>
-                    <button disabled={save.isPending || Boolean(Object.keys(errors).length)} onClick={() => void submit()} className="rounded bg-primary px-5 py-2 text-white disabled:cursor-not-allowed disabled:opacity-50">{save.isPending ? "Saving…" : "Save limits"}</button>
+                    <button disabled={save.isPending} onClick={() => void submit()} className="rounded bg-primary px-5 py-2 text-white disabled:cursor-not-allowed disabled:opacity-50">{save.isPending ? "Saving…" : "Save limits"}</button>
+                    <FormStatus message={form.statusMessage} />
                     {message && <p aria-live="polite" className="text-sm text-on-surface-variant">{message}</p>}
                   </div>}
           </SettingsSection>
@@ -192,7 +254,7 @@ export default function SettingsPage() {
         </div>
         <div className="space-y-8 md:col-span-5">
           <SettingsSection title="Trading defaults" icon="settings_input_component">
-            <p className="text-sm text-on-surface-variant">Trading preference controls are coming soon.</p>
+            <TimingSettings address={wallet.address} />
           </SettingsSection>
         </div>
       </div>

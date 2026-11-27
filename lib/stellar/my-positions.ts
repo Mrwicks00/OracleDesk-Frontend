@@ -3,6 +3,7 @@ import { rpcServer } from "./clients";
 import { withRpcPriority } from "./rpc-scheduler";
 import { priceYesBps, settleValue, type Settlement } from "./generated/fpmm";
 import type { Market, Position } from "./generated/market-core";
+import type { EntryTtl } from "./ttl";
 import {
   chunks,
   isMarket,
@@ -43,6 +44,7 @@ export interface HolderPosition {
   /** Live YES price in bps; null when the market entry is unavailable. */
   yesBps: number | null;
   archived: boolean;
+  ttl?: { position: EntryTtl; market: EntryTtl };
 }
 
 export interface PositionScan {
@@ -93,11 +95,15 @@ export async function readHolderPositions(
   server: rpc.Server = rpcServer(),
 ): Promise<HolderPosition[]> {
   const found = new Map<bigint, Position>();
+  const positionTtls = new Map<bigint, number | null>();
+  let latestLedger = 0;
+
   for (const keyChunk of chunks(ids, LEDGER_ENTRY_CHUNK_SIZE)) {
     const keys = keyChunk.map((id) => ({ id, key: positionLedgerKey(id, holder) }));
     const response = await withRpcPriority({ priority: "background", tag: "positions" }, () =>
       server.getLedgerEntries(...keys.map(({ key }) => key)),
     );
+    latestLedger = Math.max(latestLedger, response.latestLedger);
     const idByKey = new Map(keys.map(({ id, key }) => [key.toXDR("base64"), id]));
     for (const entry of response.entries) {
       const id = idByKey.get(entry.key.toXDR("base64"));
@@ -105,12 +111,12 @@ export async function readHolderPositions(
       const position = readUdt<unknown>("Position", entry.val.contractData().val());
       if (!isPosition(position) || (position.yes === 0n && position.no === 0n)) continue;
       found.set(id, position);
+      positionTtls.set(id, entry.liveUntilLedgerSeq ?? null);
     }
   }
 
   const markets = new Map<bigint, Market>();
-  const archivedIds = new Map<bigint, boolean>();
-  let latestLedger = 0;
+  const marketTtls = new Map<bigint, number | null>();
   const holdingIds = [...found.keys()];
   for (const keyChunk of chunks(holdingIds, LEDGER_ENTRY_CHUNK_SIZE)) {
     const keys = keyChunk.map((id) => ({ id, key: marketLedgerKey(id) }));
@@ -125,7 +131,7 @@ export async function readHolderPositions(
       const market = readUdt<unknown>("Market", entry.val.contractData().val());
       if (!isMarket(market)) continue;
       markets.set(id, market);
-      archivedIds.set(id, entry.liveUntilLedgerSeq !== undefined && entry.liveUntilLedgerSeq < latestLedger);
+      marketTtls.set(id, entry.liveUntilLedgerSeq ?? null);
     }
   }
 
@@ -134,6 +140,12 @@ export async function readHolderPositions(
       const market = markets.get(marketId) ?? null;
       const settlement = market ? settlementOf(market.status) : null;
       const valuation = market ? positionValue(position, market) : null;
+      const posLive = positionTtls.get(marketId) ?? null;
+      const mktLive = marketTtls.get(marketId) ?? null;
+      const posArchived = posLive !== null ? posLive < latestLedger : false;
+      const mktArchived = mktLive !== null ? mktLive < latestLedger : false;
+      const archived = posArchived || mktArchived;
+
       return {
         marketId,
         yes: position.yes,
@@ -142,7 +154,23 @@ export async function readHolderPositions(
         settlement,
         valueRaw: valuation?.valueRaw ?? null,
         yesBps: valuation?.yesBps ?? null,
-        archived: archivedIds.get(marketId) ?? false,
+        archived,
+        ttl: {
+          position: {
+            key: positionLedgerKey(marketId, holder),
+            kind: "position" as const,
+            marketId,
+            liveUntil: posLive,
+            latestLedger,
+          },
+          market: {
+            key: marketLedgerKey(marketId),
+            kind: "market" as const,
+            marketId,
+            liveUntil: mktLive,
+            latestLedger,
+          },
+        },
       };
     })
     .sort((a, b) => (a.marketId < b.marketId ? 1 : a.marketId > b.marketId ? -1 : 0));

@@ -310,7 +310,7 @@ async function challengeHash(transaction: string): Promise<string> {
  * backend can prove the signature it verifies is over the challenge it issued.
  */
 export async function signInWithWallet(
-  address: string,
+  address: string | LoginIdentity,
   signTransaction: (xdr: string, networkPassphrase: string) => Promise<string>,
   isCurrent: () => boolean = () => true,
   opts: {

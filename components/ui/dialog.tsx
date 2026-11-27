@@ -4,6 +4,8 @@ import * as React from "react";
 import { Dialog as D } from "radix-ui";
 import { cn } from "@/lib/utils";
 
+export const DialogContainerContext = React.createContext<boolean>(false);
+
 export const Dialog = D.Root;
 export const DialogTrigger = D.Trigger;
 export const DialogPortal = D.Portal;
@@ -53,7 +55,9 @@ export const DialogContent = React.forwardRef<
         className
       )}
     >
-      {children}
+      <DialogContainerContext.Provider value={true}>
+        {children}
+      </DialogContainerContext.Provider>
     </D.Content>
   </D.Portal>
 ));

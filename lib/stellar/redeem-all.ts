@@ -3,6 +3,7 @@ import { rpcServer } from "./clients";
 import { settleValue, type Settlement } from "./generated/fpmm";
 import type { Market, Position } from "./generated/market-core";
 import { getIndex } from "./wallet-market-index";
+import type { EntryTtl } from "./ttl";
 import {
   chunks,
   isMarket,
@@ -28,6 +29,7 @@ export interface Redeemable {
   no: bigint;
   expectedPayout: bigint;
   archived: boolean;
+  ttl?: { position: EntryTtl; market: EntryTtl };
 }
 
 export interface RedeemDiscovery {
@@ -119,6 +121,22 @@ export async function discoverRedeemable(
       no: item.position.no,
       expectedPayout: settleValue(settlement, item.position.yes, item.position.no),
       archived,
+      ttl: {
+        position: {
+          key: positionLedgerKey(item.id, holder),
+          kind: "position" as const,
+          marketId: item.id,
+          liveUntil: item.liveUntilLedgerSeq ?? null,
+          latestLedger,
+        },
+        market: {
+          key: marketLedgerKey(item.id),
+          kind: "market" as const,
+          marketId: item.id,
+          liveUntil: marketEntry.liveUntilLedgerSeq ?? null,
+          latestLedger,
+        },
+      },
     });
   }
   return { redeemables, scannedMarkets, totalMarkets, scanLimited: totalMarkets > scannedMarkets };

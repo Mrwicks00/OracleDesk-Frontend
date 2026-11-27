@@ -8,6 +8,12 @@ import { priceYesBps } from "@/lib/stellar/generated/fpmm";
 import { preTradeReserves, type TradeEventData } from "@/lib/stellar/trade-math";
 import type { OnChainMarketView } from "@/lib/hooks/useStellar";
 import { loadPriceHistory, type Coverage, type PricePoint } from "@/lib/stellar/price-history";
+import {
+  aggregateMarketActivity,
+  parseTimestampSec,
+  sharedMarketEventCache,
+  type MarketActivity24h,
+} from "@/lib/stellar/market-activity";
 
 export interface Window24h {
   points: { time: number; yesBps: bigint }[];
@@ -17,6 +23,7 @@ export interface Window24h {
   trades: number;
   truncated: boolean;
   reason?: "too-young" | "unavailable" | "no-trades";
+  activity?: MarketActivity24h;
 }
 
 const DAY_IN_SECONDS = 86_400;
@@ -133,12 +140,52 @@ export function useRecentPriceWindow(onChainId: string | null, view: OnChainMark
           const event = decodeEvent(raw);
           return event ? [event] : [];
         });
-        return buildWindow(events, current, Date.now() / 1000, page.events.length >= PRICE_WINDOW_LIMIT);
+        const nowSec = Math.floor(Date.now() / 1000);
+        const truncated = page.events.length >= PRICE_WINDOW_LIMIT;
+        const timestamps = events
+          .map(e => parseTimestampSec(e.closedAt))
+          .filter((t): t is number => t !== null);
+        const oldestAvailableSec = timestamps.length > 0 ? Math.min(...timestamps) : null;
+        sharedMarketEventCache.ingestChainEvents(onChainId, events, {
+          truncated,
+          oldestAvailableSec,
+          nowSec,
+        });
+        const windowResult = buildWindow(events, current, nowSec, truncated);
+        return {
+          ...windowResult,
+          activity: sharedMarketEventCache.getActivity(onChainId, nowSec) ?? undefined,
+        };
       } catch {
-        return { points: [], startBps: null, endBps, changeBps: null, trades: 0, truncated: false, reason: "unavailable" };
+        return {
+          points: [],
+          startBps: null,
+          endBps,
+          changeBps: null,
+          trades: 0,
+          truncated: false,
+          reason: "unavailable",
+          activity: aggregateMarketActivity([], { nowSec: Math.floor(Date.now() / 1000), unavailable: true }),
+        };
       }
     },
   });
+}
+
+/**
+ * Reads 24h volume, fees, and unique trader count for a market using the same
+ * shared query and event cache as `useRecentPriceWindow` (zero duplicate RPC calls).
+ */
+export function useMarketActivity(
+  onChainId: string | null,
+  view: OnChainMarketView | undefined,
+): { activity: MarketActivity24h | null; isLoading: boolean } {
+  const windowQuery = useRecentPriceWindow(onChainId, view);
+  const cached = onChainId ? sharedMarketEventCache.getActivity(onChainId) : null;
+  return {
+    activity: windowQuery.data?.activity ?? cached,
+    isLoading: windowQuery.isLoading,
+  };
 }
 
 export const priceHistoryKey = (id: string) => ["stellar", "priceHistory", id] as const;

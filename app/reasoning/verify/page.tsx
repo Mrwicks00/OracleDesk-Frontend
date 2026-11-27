@@ -11,7 +11,7 @@ import { CONTRACTS, explorerAccount } from "@/lib/stellar/config";
 import { reasoningRegistry } from "@/lib/stellar/clients";
 import { read, bytesToHex } from "@/lib/stellar/typed-call";
 import { ipfsUrl, verifyTraceInWorker, type GatewayAttempt, type CidCheck, type TraceCheck } from "@/lib/stellar/trace";
-import { parseRecordId, parseU64 } from "@/lib/validation/ids";
+import { parseVerifyTraceParams, routes } from "@/lib/routes";
 import { SafeTraceViewer } from "@/components/safe-trace-viewer";
 import { MarketTraceAudit } from "@/components/market-trace-audit";
 import {
@@ -91,14 +91,13 @@ function VerifyTraceContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const rawTraceId = searchParams.get("traceId");
-  const traceId = parseRecordId(rawTraceId);
-  const rawOnChainTraceId = searchParams.get("onChainTraceId");
-  const onChainTraceIdParam = parseU64(rawOnChainTraceId);
-  const marketIdParam = parseRecordId(searchParams.get("marketId"));
-  const onChainMarketIdParam = parseU64(searchParams.get("onChainMarketId"));
-  const invalidTraceLink = Boolean(rawTraceId) && !traceId;
-  const invalidChainLink = Boolean(rawOnChainTraceId) && !onChainTraceIdParam;
+  const parsedParams = parseVerifyTraceParams(searchParams);
+  const traceId = parsedParams.ok ? parsedParams.traceId : null;
+  const onChainTraceIdParam = parsedParams.ok ? parsedParams.onChainTraceId : null;
+  const marketIdParam = parsedParams.ok ? parsedParams.marketId : null;
+  const onChainMarketIdParam = parsedParams.ok ? parsedParams.onChainMarketId : null;
+  const invalidTraceLink = !parsedParams.ok && parsedParams.invalid.includes("traceId");
+  const invalidChainLink = !parsedParams.ok && parsedParams.invalid.includes("onChainTraceId");
 
   const [activeTab, setActiveTab] = useState<"trace" | "market">(
     marketIdParam || onChainMarketIdParam ? "market" : "trace",
@@ -262,7 +261,7 @@ function VerifyTraceContent() {
       </div>
 
       <LiveRegion message={verifyAnnouncement} />
-      <Dialog open onOpenChange={(open) => !open && router.push("/reasoning")}>
+      <Dialog open onOpenChange={(open) => !open && router.push(routes.reasoning())}>
         <DialogContent
           className={`bg-white w-full ${activeTab === "market" ? "max-w-5xl" : "max-w-2xl"} my-8 rounded-xl border border-outline-variant shadow-2xl overflow-hidden flex flex-col p-0 max-h-[90vh]`}
         >
@@ -479,13 +478,13 @@ function VerifyTraceContent() {
           {activeTab === "market" ? (
             <div className="p-4 bg-surface-container-low border-t border-outline-variant flex justify-between items-center text-xs text-on-surface-variant font-data-mono shrink-0">
               <span>Contract: {CONTRACTS.reasoningRegistry.slice(0, 10)}…</span>
-              <Link href="/reasoning" className="px-4 py-2 font-label-caps text-primary hover:underline font-bold uppercase">
+              <Link href={routes.reasoning()} className="px-4 py-2 font-label-caps text-primary hover:underline font-bold uppercase">
                 Back to Feed
               </Link>
             </div>
           ) : (
             <div className="p-6 bg-surface-container-low border-t border-outline-variant flex justify-end gap-3 shrink-0">
-              <Link href="/reasoning" className="px-6 py-2 font-label-caps text-on-surface-variant hover:text-on-surface transition-colors uppercase">
+              <Link href={routes.reasoning()} className="px-6 py-2 font-label-caps text-on-surface-variant hover:text-on-surface transition-colors uppercase">
                 {isComplete ? "BACK TO FEED" : "CANCEL AUDIT"}
               </Link>
 
@@ -497,7 +496,7 @@ function VerifyTraceContent() {
 
               <button 
                 className={`px-8 py-2 text-primary-foreground font-label-caps rounded transition-all active:scale-95 ${isComplete ? (verificationResult?.verified ? 'bg-secondary' : 'bg-error') : 'bg-primary hover:bg-primary-container'} ${(isVerifying && !isComplete) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                onClick={() => isComplete ? router.push('/reasoning') : startVerification()}
+                onClick={() => isComplete ? router.push(routes.reasoning()) : startVerification()}
                 disabled={isVerifying && !isComplete}
               >
                 {isComplete ? "DONE" : isVerifying ? "VERIFYING..." : "BEGIN VERIFICATION"}

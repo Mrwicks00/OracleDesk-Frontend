@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
+import noAriaInvalidWithoutDescribedbyRule from "./eslint-rules/no-aria-invalid-without-describedby.mjs";
 // React Compiler lint plugin (issue #152). Install with:
 //   npm install --save-dev eslint-plugin-react-compiler
 // When the package is not present the import resolves to null and the rules
@@ -186,9 +187,15 @@ const eslintConfig = defineConfig([
     files: ["app/**/*.tsx", "components/**/*.tsx"],
     plugins: {
       "rtl-logical": rtlPlugin,
+      "a11y-forms": {
+        rules: {
+          "no-aria-invalid-without-describedby": noAriaInvalidWithoutDescribedbyRule,
+        },
+      },
     },
     rules: {
       "rtl-logical/no-physical-classes": "error",
+      "a11y-forms/no-aria-invalid-without-describedby": "error",
     },
   },
   {

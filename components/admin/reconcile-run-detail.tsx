@@ -16,6 +16,7 @@ import { downloadTextFile, exportFindingsCsv, exportFindingsJson } from "@/lib/a
 import type { RecheckResult } from "@/lib/admin/recheck";
 import { useRecheck, useReconcileRun } from "@/lib/hooks/useReconciliation";
 import { formatHashHex } from "@/lib/stellar/market-question";
+import { parseOnChainMarketId, routes } from "@/lib/routes";
 
 type Finding = DriftFinding;
 
@@ -107,9 +108,16 @@ const FindingRow = memo(function FindingRow({
       </td>
       <td className="px-3 py-2 font-data-mono text-xs">{actionLabel(finding.action)}</td>
       <td className="px-3 py-2 font-data-mono text-xs">
-        <Link className="text-primary underline" href={`/markets/quick-view?onChainId=${encodeURIComponent(finding.onChainMarketId)}`}>
-          {finding.onChainMarketId}
-        </Link>
+        {(() => {
+          const onChainId = parseOnChainMarketId(finding.onChainMarketId);
+          return onChainId ? (
+            <Link className="text-primary underline" href={routes.marketsQuickView({ onChainId })}>
+              {finding.onChainMarketId}
+            </Link>
+          ) : (
+            <span>{finding.onChainMarketId}</span>
+          );
+        })()}
         <div className="text-[10px] text-on-surface-variant">{finding.marketId}</div>
       </td>
       <td className="px-3 py-2 text-xs break-all">{hash(finding.dbValue)}</td>

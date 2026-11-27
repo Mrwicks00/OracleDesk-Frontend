@@ -5,6 +5,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useUserScope } from "@/lib/query/scope";
 import { userKeys } from "@/lib/query/keys";
 import { useWallet } from "@/lib/contexts/WalletContext";
+import { useWalletMeta } from "@/lib/stellar/WalletProvider";
+import { effectiveCaps } from "@/lib/stellar/wallet-capabilities";
 import { currentRpcUrl, rpcServer } from "@/lib/stellar/clients";
 import { NETWORK_LABEL, NETWORK_PASSPHRASE, STELLAR_NETWORK_ID, X402_URL } from "@/lib/stellar/config";
 import { UserFacingError } from "@/lib/stellar/errors";
@@ -31,6 +33,7 @@ export const x402Transport = (): X402Transport => ({ baseUrl: X402_URL, network:
  */
 export function useX402UnlockDeps(): UnlockDeps | null {
   const { signer, isWrongNetwork } = useWallet();
+  const { selectedWalletId } = useWalletMeta();
   return useMemo(() => {
     if (!signer) return null;
     return {
@@ -40,13 +43,14 @@ export function useX402UnlockDeps(): UnlockDeps | null {
       transport: x402Transport(),
       sign: async (paymentRequired, requirement) => {
         if (isWrongNetwork) throw new UserFacingError({ kind: "wrong-network", message: `Switch your wallet to ${NETWORK_LABEL} and try again.` });
-        if (!signer.signAuthEntry) {
-          throw new UserFacingError({ kind: "unknown", message: "Your wallet can't sign Soroban authorization entries, which x402 payments need." });
+        // Refuse before any payment header is built when the selected wallet is known not to sign auth entries.
+        if (effectiveCaps(selectedWalletId).signAuthEntry === "no" || !signer.signAuthEntry) {
+          throw new UserFacingError({ kind: "unknown", message: "Your wallet can't sign Soroban authorization entries, which x402 payments need. Switch wallet to unlock." });
         }
         return createPaymentHeader(paymentRequired, requirement, { address: signer.publicKey, signAuthEntry: signer.signAuthEntry }, currentRpcUrl());
       },
     };
-  }, [signer, isWrongNetwork]);
+  }, [signer, isWrongNetwork, selectedWalletId]);
 }
 
 /** Re-reads journal queries when any tab writes to the journal. */

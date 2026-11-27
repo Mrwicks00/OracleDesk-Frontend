@@ -13,7 +13,7 @@ export default defineConfig({
         test: {
           name: "unit",
           environment: "node",
-          include: ["lib/**/*.test.ts", "components/**/*.test.ts", "scripts/**/*.test.ts", "scripts/**/*.test.mjs"],
+          include: ["lib/**/*.test.ts", "components/**/*.test.ts", "scripts/**/*.test.ts", "scripts/**/*.test.mjs", "eslint-rules/**/*.test.mjs"],
           typecheck: { enabled: true, include: ["lib/**/*.test-d.ts"], tsconfig: "./tsconfig.json" },
         },
       },

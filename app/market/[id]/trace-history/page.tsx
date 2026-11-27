@@ -7,6 +7,7 @@ import Link from "next/link";
 import { TraceHistoryViewer } from "@/components/trace-history-viewer";
 import { TraceDiff, fetchTraceVersion, computeTraceDiff } from "@/lib/services/trace-history";
 import { listTraces } from "@/lib/api/traces";
+import { parseBackendMarketId, parseOnChainMarketId, routes } from "@/lib/routes";
 
 export function generateStaticParams() {
   return [{ id: "fallback" }];
@@ -67,11 +68,23 @@ export default function MarketTraceHistoryPage() {
     loadTraceHistory();
   }, [marketId]);
 
+  const parsedOnChainId = parseOnChainMarketId(marketId);
+  const parsedBackendId = parseBackendMarketId(marketId);
+  const backHref = parsedBackendId
+    ? routes.marketsQuickView({ marketId: parsedBackendId })
+    : parsedOnChainId
+      ? routes.market({ onChainId: parsedOnChainId })
+      : routes.markets();
+  const verifyHref = routes.reasoningVerify({
+    marketId: parsedBackendId ?? undefined,
+    onChainMarketId: parsedOnChainId ?? undefined,
+  });
+
   return (
     <main className="pt-24 pb-12 px-gutter max-w-container-max-width mx-auto">
       <div className="mb-8">
         <Link
-          href={`/market?id=${marketId}`}
+          href={backHref}
           className="flex items-center gap-2 text-primary hover:underline mb-4 font-label-caps text-label-caps"
         >
           <Icon name="arrow_back" className="text-base" />
@@ -85,7 +98,7 @@ export default function MarketTraceHistoryPage() {
             </p>
           </div>
           <Link
-            href={`/reasoning/verify?marketId=${encodeURIComponent(marketId)}&onChainMarketId=${encodeURIComponent(marketId)}`}
+            href={verifyHref}
             className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary text-primary-foreground rounded-lg font-label-caps text-xs font-bold hover:bg-primary/90 transition-all shadow-sm shrink-0"
           >
             <Icon name="verified" className="text-sm" />

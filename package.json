@@ -30,6 +30,8 @@
     "i18n:check": "node scripts/i18n-check.mjs",
     "i18n:types": "node scripts/i18n-check.mjs --write",
     "i18n:pseudo": "node scripts/i18n-check.mjs --pseudo",
+    "check:route-params": "node scripts/check-route-params.mjs",
+    "check:route-links": "node scripts/check-route-links.mjs",
     "scan:secrets": "node scripts/scan-build-secrets.mjs",
     "install:allowed-scripts": "node scripts/run-allowed-install-scripts.mjs",
     "perf:lhci": "node scripts/run-lhci.mjs",

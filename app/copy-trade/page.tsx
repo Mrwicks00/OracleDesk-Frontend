@@ -4,6 +4,9 @@ import { Icon } from "@/components/ui/icon";
 import { SigningIdentities, TxReview, TxReviewPreferenceControl, shouldSkipTxReview } from "@/components/tx-review";
 import type { ReviewModel } from "@/lib/stellar/tx-decode";
 import { useSubmitQueueState } from "@/lib/stellar/submit-queue";
+import { useFormErrors, ErrorSummary, FieldError, FormStatus } from "@/components/ui/form-errors";
+import { mapErrorToField } from "@/lib/forms/error-map";
+import { Term } from "@/components/ui/term";
 
 
 import React, { useState, useRef, useEffect, useCallback, Suspense } from "react";
@@ -19,7 +22,7 @@ import { userMessage } from "@/lib/errors/display";
 import { useMarket } from "@/lib/hooks/useMarkets";
 import { useQuoteBuy, useUsdcBalance, useAccountReserve, usePrepareBuy, useOnChainMarket, fetchOnChainMarketBySimulation, useUsdcTrustline, useEnableUsdc, useUsdcBalanceState, type PreparedWriteReview } from "@/lib/hooks/useStellar";
 import { explorerTx, NETWORK_LABEL } from "@/lib/stellar/config";
-import { parseRecordId } from "@/lib/validation/ids";
+import { parseCopyTradeParams, routes } from "@/lib/routes";
 import { formatXlm, minOut, probabilityToBps, BPS } from "@/lib/stellar/units";
 import { useFormat, type Formatters } from "@/lib/format/useFormat";
 import { useTranslations } from "@/lib/i18n/provider";
@@ -124,10 +127,10 @@ function CopyTradeContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const rawTraceId = searchParams.get("traceId");
-  const traceId = parseRecordId(rawTraceId);
-  const marketIdParam = parseRecordId(searchParams.get("marketId"));
-  const invalidTraceLink = Boolean(rawTraceId) && !traceId;
+  const parsedParams = parseCopyTradeParams(searchParams);
+  const traceId = parsedParams.ok ? parsedParams.traceId : null;
+  const marketIdParam = parsedParams.ok ? parsedParams.marketId : null;
+  const invalidTraceLink = !parsedParams.ok && parsedParams.invalid.includes("traceId");
 
   const traceQuery = useTrace(traceId ?? undefined);
   const trace = traceQuery.data ?? null;
@@ -173,6 +176,8 @@ function CopyTradeContent() {
   const [reviewModel, setReviewModel] = useState<{ model: ReviewModel; changedFrom?: ReviewModel } | null>(null);
   const reviewResolver = useRef<((approved: boolean) => void) | null>(null);
   const allocationControlRef = useRef<HTMLButtonElement | null>(null);
+
+  const form = useFormErrors(["fixedAmount", "cap", "outcome", "amount"] as const);
   const reviewPreparedBuy = useCallback<PreparedWriteReview>(async (_prepared, model, changedFrom, forceReview = false) => {
     if (!forceReview && shouldSkipTxReview()) return true;
     return new Promise<boolean>((resolve) => {
@@ -254,6 +259,14 @@ function CopyTradeContent() {
   const debouncedAmount = useDebounced(amountRaw, QUOTE_DEBOUNCE_MS);
   const quote = useQuoteBuy(onChainMarketId, side ?? "Yes", side ? debouncedAmount : null);
   const minShares = quote.data !== undefined ? minOut(quote.data, slippageBps) : null;
+
+  useEffect(() => {
+    if (localQuote && amountRaw !== null && amountRaw > 0n) {
+      const shares = fmt.usdc(localQuote.sharesOut, { maxDecimals: 1 });
+      const edge = fmt.percent(localQuote.edgeAfterBps);
+      form.announceSettled("quote", `Estimated ${shares} shares, edge ${edge}`);
+    }
+  }, [localQuote?.sharesOut, localQuote?.edgeAfterBps, amountRaw, form, fmt]);
   const prepareBuy = usePrepareBuy({
     marketId: onChainMarketId,
     outcome: side ?? "Yes",
@@ -297,6 +310,24 @@ function CopyTradeContent() {
       setStatusMessage(t("trade.copy.checkingMarket"));
       return;
     }
+    const valid = form.attemptSubmit(() => {
+      const errs: Partial<Record<"fixedAmount" | "cap" | "outcome" | "amount", string>> = {};
+      if (!side) {
+        errs.outcome = "Select an outcome (Yes or No).";
+      }
+      if (sizingKind === "fixed" && (fixedInput.trim() === "" || fixedAmount === null)) {
+        errs.fixedAmount = "Enter an amount like 10 or 2.5 (up to 7 decimal places).";
+      }
+      if (capInput.trim() !== "" && userCap === null) {
+        errs.cap = "Enter an amount like 10 or 2.5.";
+      }
+      if (!amountRaw || amountRaw <= 0n) {
+        errs.amount = "Choose an allocation greater than zero. You may need USDC in your wallet first.";
+      }
+      return errs;
+    });
+    if (!valid) return;
+
     if (!marketCanTrade) {
       setStatusMessage(t("trade.copy.marketClosed"));
       return;
@@ -376,6 +407,16 @@ function CopyTradeContent() {
       const explorerUrl = result.txHash ? explorerTx(result.txHash) : null;
       if (explorerUrl) window.open(explorerUrl, "_blank", "noopener,noreferrer");
     } catch (error) {
+      const mapped = mapErrorToField(error, {
+        SlippageExceeded: "amount",
+        "insufficient-balance": "amount",
+        TRACE_LOCKED: "amount",
+      });
+      if ("field" in mapped.target) {
+        form.setErrors({ [mapped.target.field]: mapped.message });
+      } else {
+        form.setFormError(mapped.message);
+      }
       setStatusMessage(userMessage(error));
     } finally {
       setIsSubmitting(false);
@@ -502,21 +543,29 @@ function CopyTradeContent() {
               </div>
               {sizingKind === "fixed" && (
                 <div className="space-y-1">
-                  <label htmlFor="fixed-amount" className="text-[11px] text-on-surface-variant">Amount in USDC</label>
+                  <label htmlFor={form.ids.fixedAmount.input} className="text-[11px] text-on-surface-variant">Amount in USDC</label>
                   <input
-                    id="fixed-amount"
+                    id={form.ids.fixedAmount.input}
                     inputMode="decimal"
                     autoComplete="off"
                     value={fixedInput}
                     disabled={isWatching && !isConnected}
                     onChange={(e) => setFixedInput(e.target.value)}
+                    onBlur={() => form.handleBlur("fixedAmount")}
                     placeholder="e.g. 25"
-                    aria-invalid={fixedInput.trim() !== "" && fixedAmount === null}
+                    aria-invalid={Boolean(form.errors.fixedAmount || (fixedInput.trim() !== "" && fixedAmount === null))}
+                    aria-describedby={form.ids.fixedAmount.error}
                     className="w-full border border-outline-variant rounded px-3 py-2 font-data-mono text-sm bg-white disabled:opacity-50"
                   />
-                  {fixedInput.trim() !== "" && fixedAmount === null && (
-                    <p className="text-[11px] text-error">Enter an amount like 10 or 2.5 (up to 7 decimal places).</p>
-                  )}
+                  <FieldError
+                    id={form.ids.fixedAmount.error}
+                    message={
+                      form.errors.fixedAmount ??
+                      (fixedInput.trim() !== "" && fixedAmount === null
+                        ? "Enter an amount like 10 or 2.5 (up to 7 decimal places)."
+                        : undefined)
+                    }
+                  />
                 </div>
               )}
               {sizingKind === "mirror" && (
@@ -524,26 +573,34 @@ function CopyTradeContent() {
                   {typeof trace?.betFraction === "number" ? (
                     `The agent bet ${(trace.betFraction * 100).toFixed(1)}% of its bankroll. You copy the same share of your balance, capped as below.`
                   ) : (
-                    <>Unlock this trace to mirror the agent&apos;s size. <Link href="/premium" className="underline">See access options</Link></>
+                    <>Unlock this trace to mirror the agent&apos;s size. <Link href={routes.premium()} className="underline">See access options</Link></>
                   )}
                 </p>
               )}
               <div className="space-y-1">
-                <label htmlFor="trade-cap" className="text-[11px] text-on-surface-variant">Never spend more than (USDC, optional)</label>
+                <label htmlFor={form.ids.cap.input} className="text-[11px] text-on-surface-variant">Never spend more than (USDC, optional)</label>
                 <input
-                  id="trade-cap"
+                  id={form.ids.cap.input}
                   inputMode="decimal"
                   autoComplete="off"
                   value={capInput}
                   disabled={isWatching && !isConnected}
                   onChange={(e) => setCapInput(e.target.value)}
+                  onBlur={() => form.handleBlur("cap")}
                   placeholder="No cap"
-                  aria-invalid={capInput.trim() !== "" && userCap === null}
+                  aria-invalid={Boolean(form.errors.cap || (capInput.trim() !== "" && userCap === null))}
+                  aria-describedby={form.ids.cap.error}
                   className="w-full border border-outline-variant rounded px-3 py-2 font-data-mono text-sm bg-white disabled:opacity-50"
                 />
-                {capInput.trim() !== "" && userCap === null && (
-                  <p className="text-[11px] text-error">Enter an amount like 10 or 2.5.</p>
-                )}
+                <FieldError
+                  id={form.ids.cap.error}
+                  message={
+                    form.errors.cap ??
+                    (capInput.trim() !== "" && userCap === null
+                      ? "Enter an amount like 10 or 2.5."
+                      : undefined)
+                  }
+                />
               </div>
               {choice?.unavailable && sizingKind === "mirror" && <p className="text-[11px] text-error">{choice.unavailable}</p>}
               {sizingKind === "percent" && (
@@ -608,13 +665,10 @@ function CopyTradeContent() {
                     <>
                       <span className="text-on-surface font-bold">{fmt.usdc(quote.data, { maxDecimals: 2 })}</span>
                       <span className="block text-[10px] text-on-surface-variant">
-                        at least {fmt.usdc(minShares, { maxDecimals: 2 })} after slippage
+                        at least {fmt.usdc(minShares, { maxDecimals: 2 })} after <Term id="slippage">slippage</Term>
                         {fees && (
-                          <span
-                            className="block text-[10px] text-on-surface-variant mt-1"
-                            title={`Inclusion: ${formatXlm(fees.inclusionFee)} XLM · Resource: ${formatXlm(fees.resourceFee)} XLM (assumes the network base reserve of 0.5 XLM)`}
-                          >
-                            Network fee ≈ {formatXlm(fees.totalFee)} XLM ·{" "}
+                          <span className="block text-[10px] text-on-surface-variant mt-1">
+                            Network fee ≈ {formatXlm(fees.totalFee)} XLM (inclusion: {formatXlm(fees.inclusionFee)}, resource: {formatXlm(fees.resourceFee)}) ·{" "}
                             {reserve.isLoading
                               ? "checking XLM…"
                               : reserve.isError
@@ -719,6 +773,19 @@ function CopyTradeContent() {
                   {waitingForBuy ? "Waiting for your previous transaction to finish…" : statusMessage}
                 </div>
               )}
+              <ErrorSummary
+                errors={form.errors}
+                formError={form.formError}
+                ids={form.ids}
+                labels={{
+                  fixedAmount: "Amount in USDC",
+                  cap: "Cap",
+                  outcome: "Outcome",
+                  amount: "Trade amount",
+                }}
+                summaryRef={form.summaryRef}
+              />
+              <FormStatus message={form.statusMessage} />
               <SigningIdentities keys={["marketCore", "usdc"]} compact />
               <div className="flex gap-3">
                 <button

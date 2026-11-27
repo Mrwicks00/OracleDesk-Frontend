@@ -11,6 +11,7 @@ import { SourceTag } from "@/components/ui/source-tag";
 import { TxReview, shouldSkipTxReview } from "@/components/tx-review";
 import { LiveRegion } from "@/components/ui/live-region";
 import { quoteAnnouncement } from "@/lib/ui/quote-announcement";
+import { parseOnChainMarketId, routes } from "@/lib/routes";
 import { useHealth } from "@/lib/health/HealthProvider";
 import {
   useAccountAuth,
@@ -28,11 +29,15 @@ import {
   useQuoteBuy,
   useUsdcBalance,
   useUsdcBalanceState,
+  useUsdcIssuerVerification,
   useUsdcTrustline,
 } from "@/lib/hooks/useStellar";
+import { isMainnetPassphrase } from "@/lib/stellar/issuer-verification";
+import { SafeText } from "@/components/safe-text";
 import { useWalletActions, useWalletAddress, useWalletNetwork } from "@/lib/contexts/WalletContext";
 import { useViewedAddress } from "@/lib/hooks/useViewedAddress";
 import { useSettings } from "@/lib/settings/useSettings";
+import { SigningCountdown } from "@/components/tx/signing-countdown";
 import { explorerTx, NETWORK_LABEL } from "@/lib/stellar/config";
 import { MIN_TX_TIMEOUT_S, SAFETY_MARGIN_S } from "@/lib/stellar/deadline";
 import { isStale } from "@/lib/stellar/health";
@@ -43,6 +48,9 @@ import type { TxPhase } from "@/lib/stellar/tx-lifecycle";
 import { formatXlm, maxIn, minOut } from "@/lib/stellar/units";
 import { useFormat } from "@/lib/format/useFormat";
 import { userMessage } from "@/lib/errors/display";
+import { Term } from "@/components/ui/term";
+import { useFormErrors, ErrorSummary, FieldError } from "@/components/ui/form-errors";
+import { mapErrorToField } from "@/lib/forms/error-map";
 
 /** A chain read older than this must be refreshed before a trade is signed. */
 const MARKET_STALE_AFTER_SEC = 60;
@@ -126,6 +134,9 @@ export function BuyTicket({ onChainMarketId, side, amountInputRef }: BuyTicketPr
   const ledger = useLedgerClock();
   const trustline = useUsdcTrustline(address);
   const enableUsdc = useEnableUsdc();
+  const issuerVerification = useUsdcIssuerVerification();
+  const mainnet = isMainnetPassphrase();
+  const issuerBlockedOnMainnet = mainnet && issuerVerification.data?.status !== "verified";
   const trustlineMissing = trustline.data?.kind === "missing";
   const trustlineUnauthorized = trustline.data?.kind === "present" && !trustline.data.authorized;
   const buy = useBuy();
@@ -146,6 +157,8 @@ export function BuyTicket({ onChainMarketId, side, amountInputRef }: BuyTicketPr
   const [amountInput, setAmountInput] = useState("10");
   const [buyResult, setBuyResult] = useState<BuyResultState | null>(null);
   const resultContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const form = useFormErrors(["amount", "slippage"] as const);
 
   useEffect(() => {
     if (buyResult?.kind === "success") {
@@ -226,6 +239,15 @@ export function BuyTicket({ onChainMarketId, side, amountInputRef }: BuyTicketPr
       void openModal();
       return;
     }
+    if (issuerBlockedOnMainnet) {
+      setBuyResult({
+        kind: "error",
+        message: issuerVerification.data
+          ? `Trading disabled on mainnet: ${issuerVerification.data.detail}`
+          : "Trading disabled on mainnet until the USDC issuer is verified via stellar.toml.",
+      });
+      return;
+    }
     if (trustlineMissing) {
       setBuyResult({ kind: "error", message: "Enable your USDC trustline below, then click Buy again." });
       return;
@@ -238,13 +260,15 @@ export function BuyTicket({ onChainMarketId, side, amountInputRef }: BuyTicketPr
       setBuyResult({ kind: "error", message: `Switch your wallet to ${NETWORK_LABEL} to place this trade.` });
       return;
     }
-    if (!amountRaw || amountRaw <= 0n) {
-      setBuyResult({
-        kind: "error",
-        message: buyMode === "usdc" ? "Enter an amount like 10 or 2.5." : "Enter a share amount greater than zero.",
-      });
-      return;
-    }
+    const valid = form.attemptSubmit(() => {
+      const errs: Partial<Record<"amount" | "slippage", string>> = {};
+      if (!amountRaw || amountRaw <= 0n) {
+        errs.amount = buyMode === "usdc" ? "Enter an amount like 10 or 2.5." : "Enter a share amount greater than zero.";
+      }
+      return errs;
+    });
+    if (!valid) return;
+
     if (ledger.now === null) {
       setBuyResult({ kind: "pending", message: "Checking market time…" });
       return;
@@ -269,6 +293,7 @@ export function BuyTicket({ onChainMarketId, side, amountInputRef }: BuyTicketPr
         collateralIn: spendRaw ?? 0n,
         review,
         slippageBps,
+        timing: settings.timing.mode,
         prepared: prepareBuy.data,
       });
       setBuyResult({
@@ -277,6 +302,17 @@ export function BuyTicket({ onChainMarketId, side, amountInputRef }: BuyTicketPr
         txHash: result.txHash,
       });
     } catch (err) {
+      const mapped = mapErrorToField(err, {
+        SlippageExceeded: "slippage",
+        InsufficientBalance: "amount",
+        InvalidAmount: "amount",
+        "insufficient-balance": "amount",
+      });
+      if ("field" in mapped.target) {
+        form.setErrors({ [mapped.target.field]: mapped.message });
+      } else {
+        form.setFormError(mapped.message);
+      }
       setBuyResult({
         kind: "error",
         message: userMessage(err),
@@ -303,6 +339,15 @@ export function BuyTicket({ onChainMarketId, side, amountInputRef }: BuyTicketPr
   const handlePrepareMultisig = async () => {
     if (!isConnected) {
       void openModal();
+      return;
+    }
+    if (issuerBlockedOnMainnet) {
+      setBuyResult({
+        kind: "error",
+        message: issuerVerification.data
+          ? `Trading disabled on mainnet: ${issuerVerification.data.detail}`
+          : "Trading disabled on mainnet until the USDC issuer is verified via stellar.toml.",
+      });
       return;
     }
     if (isWrongNetwork) {
@@ -336,22 +381,38 @@ export function BuyTicket({ onChainMarketId, side, amountInputRef }: BuyTicketPr
 
   return (
     <div className="space-y-3">
+      <ErrorSummary
+        errors={form.errors}
+        formError={form.formError}
+        ids={form.ids}
+        labels={{ amount: "Amount", slippage: "Slippage" }}
+        summaryRef={form.summaryRef}
+      />
       <div className="flex items-center gap-3">
         <div className="inline-flex rounded border border-outline-variant p-0.5" role="group" aria-label="Buy amount unit">
           <button type="button" aria-pressed={buyMode === "usdc"} onClick={() => setBuyMode("usdc")} className={`px-2 py-1 text-[10px] rounded ${buyMode === "usdc" ? "bg-primary text-primary-foreground" : "text-on-surface-variant"}`}>USDC</button>
           <button type="button" aria-pressed={buyMode === "shares"} onClick={() => setBuyMode("shares")} className={`px-2 py-1 text-[10px] rounded ${buyMode === "shares" ? "bg-primary text-primary-foreground" : "text-on-surface-variant"}`}>Shares</button>
         </div>
-        <label htmlFor="buy-amount" className="font-label-caps text-label-caps text-on-surface-variant uppercase text-[10px] shrink-0">
+        <label htmlFor={form.ids.amount.input} className="font-label-caps text-label-caps text-on-surface-variant uppercase text-[10px] shrink-0">
           Amount ({buyMode === "usdc" ? "USDC" : `${side.toUpperCase()} shares`})
         </label>
-        <input
-          ref={amountInputRef}
-          id="buy-amount"
-          inputMode="decimal"
-          value={amountInput}
-          onChange={(e) => setAmountInput(e.target.value)}
-          className="flex-1 bg-surface border border-outline-variant rounded p-2 font-data-mono text-sm outline-none focus:ring-2 focus:ring-primary"
-        />
+        <div className="flex-1">
+          <input
+            ref={amountInputRef}
+            id={form.ids.amount.input}
+            inputMode="decimal"
+            value={amountInput}
+            aria-invalid={Boolean(form.errors.amount || (amountInput.trim() !== "" && amountRaw === null))}
+            aria-describedby={form.ids.amount.error}
+            onBlur={() => form.handleBlur("amount")}
+            onChange={(e) => {
+              setAmountInput(e.target.value);
+              if (form.errors.amount) form.clearErrors();
+            }}
+            className="w-full bg-surface border border-outline-variant rounded p-2 font-data-mono text-sm outline-none focus:ring-2 focus:ring-primary"
+          />
+          <FieldError id={form.ids.amount.error} message={form.errors.amount} />
+        </div>
         <button
           type="button"
           onClick={handleBuy}
@@ -378,6 +439,15 @@ export function BuyTicket({ onChainMarketId, side, amountInputRef }: BuyTicketPr
             : `Buy ${side.toUpperCase()}`}
         </button>
       </div>
+      {buy.phase.name === "awaiting-signature" && buy.phase.deadline && (
+        <SigningCountdown
+          deadline={buy.phase.deadline}
+          onNeedMoreTime={() => {
+            buy.cancelSigning();
+            setBuyResult({ kind: "pending", message: "Signature cancelled. Press Buy again to rebuild with a fresh deadline." });
+          }}
+        />
+      )}
       {isWatching && (
         <p id="watching-trade-explanation" className="sr-only">
           You are viewing another address in watch-only mode. Connect your own wallet to trade.
@@ -397,7 +467,12 @@ export function BuyTicket({ onChainMarketId, side, amountInputRef }: BuyTicketPr
               ? `≈ ${fmt.usdc(quote.data, { maxDecimals: 2 })} shares, at least ${fmt.usdc(minOut(quote.data, slippageBps), { maxDecimals: 2 })} (${fmt.percent(slippageBps)} slippage)`
               : quote.error ? userMessage(quote.error) : quote.isFetching ? "Quoting…" : ""}
           <Link
-            href={`/learn/fpmm?market=${encodeURIComponent(String(onChainMarketId ?? ""))}&side=${encodeURIComponent(side)}&amount=${encodeURIComponent(String(amountRaw ?? ""))}&slippage=${encodeURIComponent(String(slippageBps))}`}
+            href={routes.learnFpmm({
+              market: parseOnChainMarketId(onChainMarketId) ?? undefined,
+              side,
+              amount: amountRaw !== null ? String(amountRaw) : undefined,
+              slippage: slippageBps,
+            })}
             className="text-[10px] text-primary hover:underline ms-2 inline-flex items-center"
           >
             How is this calculated?
@@ -449,10 +524,30 @@ export function BuyTicket({ onChainMarketId, side, amountInputRef }: BuyTicketPr
       )}
       {ledger.now === null && <p className="text-[11px] text-on-surface-variant">Checking market time…</p>}
       {isOpen && !safeToTrade && <p className="text-[11px] text-on-surface-variant">Trading is disabled this close to the market deadline.</p>}
-      {trustlineMissing && !isWrongNetwork && (
+      {issuerVerification.data?.status === "verified" && (
+        <p className="text-[11px] text-secondary">
+          Verified USDC issuer:{" "}
+          <SafeText
+            text={issuerVerification.data.orgName || issuerVerification.data.homeDomain}
+            truncate={60}
+            showToggle={false}
+          />
+          {issuerVerification.data.orgName && (
+            <> (<SafeText text={issuerVerification.data.homeDomain} truncate={50} showToggle={false} />)</>
+          )}
+        </p>
+      )}
+      {issuerVerification.data && issuerVerification.data.status !== "verified" && (
+        <p className={`text-[11px] ${mainnet ? "text-error font-medium" : "text-tertiary"}`} role="status">
+          {mainnet
+            ? `Mainnet trading & trustline blocked (${issuerVerification.data.status}): ${issuerVerification.data.detail}`
+            : `Testnet warning — issuer ${issuerVerification.data.status}: ${issuerVerification.data.detail}`}
+        </p>
+      )}
+      {trustlineMissing && !isWrongNetwork && !issuerBlockedOnMainnet && (
         <div className="rounded-lg border border-outline-variant bg-surface-container-low p-3 space-y-2">
           <p className="text-xs text-on-surface-variant">
-            Enable USDC once to buy on Stellar. This creates a trustline and locks one base reserve (typically 0.5 XLM); it does not submit your trade.
+            Enable USDC once to buy on Stellar. This creates a <Term id="trustline">trustline</Term> and locks one <Term id="base-reserve">base reserve</Term> (typically 0.5 <Term id="xlm">XLM</Term>); it does not submit your trade.
           </p>
           <button type="button" onClick={handleEnableUsdc} disabled={enableUsdc.isPending} className="bg-primary text-primary-foreground px-3 py-2 rounded-lg text-xs font-bold disabled:opacity-50">
             {enableUsdc.isPending ? "Enabling…" : "Enable USDC"}

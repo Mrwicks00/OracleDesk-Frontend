@@ -29,15 +29,15 @@ import { seedReserves, BPS } from "@/lib/stellar/generated/fpmm";
 import { formatUsdc, USDC_UNIT } from "@/lib/stellar/units";
 import { formatUsdcDisplay, formatBps } from "@/lib/format/money";
 import { LiveRegion } from "@/components/ui/live-region";
+import { parseFpmmParams } from "@/lib/routes";
 
 export default function FpmmExplainerClient() {
   const searchParams = useSearchParams();
-  const initialMarket = searchParams.get("market") || "";
-  const initialSide = searchParams.get("side") === "No" ? "No" : "Yes";
-  const initialAmountRaw = searchParams.get("amount");
-  const initialSlippage = searchParams.get("slippage")
-    ? parseInt(searchParams.get("slippage")!, 10)
-    : 100; // 1% default
+  const parsed = parseFpmmParams(searchParams);
+  const initialMarket = parsed.ok && parsed.market ? parsed.market : "";
+  const initialSide = parsed.ok && parsed.side === "No" ? "No" : "Yes";
+  const initialAmountRaw = parsed.ok ? parsed.amount : null;
+  const initialSlippage = parsed.ok && parsed.slippage !== null ? parsed.slippage : 100; // 1% default
 
   const [selectedMarketId, setSelectedMarketId] = useState<string>(initialMarket);
   const [sandboxMode, setSandboxMode] = useState<boolean>(!initialMarket);

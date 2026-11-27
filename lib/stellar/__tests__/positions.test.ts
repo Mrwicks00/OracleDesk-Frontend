@@ -155,4 +155,32 @@ describe("positions - fetchPositionsFor", () => {
     ).toEqual([]);
     expect(await fetchPositionsFor(holder, [])).toEqual([]);
   });
+
+  it("carries both position and market TTLs and marks archived if position entry is archived", async () => {
+    const marketId = 99n;
+    const posKey = positionLedgerKey(marketId, holder);
+    const mktKey = marketLedgerKey(marketId);
+
+    const server = {
+      getLedgerEntries: vi.fn(async (...keys: FakeEntry["key"][]) => {
+        const isPos = keys[0].toXDR("base64") === posKey.toXDR("base64");
+        if (isPos) {
+          return {
+            entries: [fakeEntry(posKey, "Position", marketId, 500)],
+            latestLedger: 1000,
+          };
+        }
+        return {
+          entries: [fakeEntry(mktKey, "Market", marketId, 2000)],
+          latestLedger: 1000,
+        };
+      }),
+    };
+
+    const results = await fetchPositionsFor(holder, [marketId], server as unknown as rpc.Server);
+    expect(results.length).toBe(1);
+    expect(results[0].archived).toBe(true);
+    expect(results[0].ttl?.position.liveUntil).toBe(500);
+    expect(results[0].ttl?.market.liveUntil).toBe(2000);
+  });
 });

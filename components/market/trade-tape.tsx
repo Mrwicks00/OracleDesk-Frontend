@@ -1,5 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { usePausable } from "@/lib/a11y/pausable";
+import { useSettings } from "@/lib/settings/useSettings";
 import { useMarketTrades } from "@/lib/hooks/useMarketTrades";
 import { useWalletAddress } from "@/lib/contexts/WalletContext";
 import { explorerAccount, explorerTx } from "@/lib/stellar/config";
@@ -22,14 +24,28 @@ function MarketTape({ id, limit, compact }: { id: string; limit: number; compact
   const [want, setWant] = useState(limit);
   const [scrollTop, setScrollTop] = useState(0);
   const query = useMarketTrades(id, { limit: want });
-  const rows = query.data?.trades ?? [];
+  const live = query.data?.trades ?? [];
   const { address } = useWalletAddress();
+  const { settings } = useSettings(address);
+  const control = usePausable({ initiallyPaused: settings.timing.pauseAutoUpdates });
+  // While paused (button, focus or hover) the table holds its last snapshot; new rows are counted, not inserted.
+  const [snapshot, setSnapshot] = useState<typeof live | null>(null);
+  useEffect(() => {
+    if (control.paused) setSnapshot(previous => previous ?? live);
+    else setSnapshot(null);
+  }, [control.paused, live]);
+  const rows = control.paused && snapshot ? snapshot : live;
+  const pendingNew = control.paused && snapshot ? Math.max(0, live.length - snapshot.length) : 0;
   const first = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
   const last = Math.min(rows.length, first + VISIBLE + OVERSCAN * 2);
   const titles = ["Time", "Side", "Action", "Trader", "USDC", "Shares", "Fee", "YES after", "Transaction"];
   return <section aria-label={`Trades on market ${id}`} className={`border-t border-outline-variant ${compact ? "pt-4" : "p-6"}`}>
     <h2 className="font-headline-sm text-headline-sm mb-2">Recent trades</h2>
     <p className="text-xs text-on-surface-variant mb-3">Market #{id} · Public contract events within the RPC retention window.</p>
+    <div className="flex flex-wrap items-center gap-3 mb-2 text-xs">
+      <button type="button" aria-pressed={control.pressed} onClick={control.toggle} className="underline">Pause updates</button>
+      {pendingNew > 0 && <span aria-live="polite">{pendingNew} new trades while paused</span>}
+    </div>
     {query.isPending && <div role="status" className="h-24 bg-surface-container-low motion-safe:animate-pulse p-4">Loading trades…</div>}
     {query.isError && <p role="alert" className="text-sm text-error">Couldn&apos;t load trades. <button onClick={() => void query.refetch()} className="underline">Retry</button></p>}
     {!query.isPending && !query.isError && rows.length === 0 && <p className="py-6 text-sm text-on-surface-variant">No trades on this market in the RPC&apos;s retention window.</p>}

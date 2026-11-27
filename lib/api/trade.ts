@@ -32,11 +32,12 @@ export interface CopyTradeRecord {
 }
 
 export async function initiateCopyTrade(params: InitiateCopyTradeParams, options?: ApiRequestOptions) {
+  const idempotencyKey = options?.idempotencyKey ?? crypto.randomUUID();
   const { data } = await apiClient.post<{
     copyTradeId: string;
     transactionPayload: CopyTradePayload;
     instructions: string;
-  }>("/trade/copy", params, { "Idempotency-Key": crypto.randomUUID() }, { ...options, schema: CopyTradeInitSchema });
+  }>("/trade/copy", params, { "Idempotency-Key": idempotencyKey }, { ...options, schema: CopyTradeInitSchema });
 
   return data;
 }

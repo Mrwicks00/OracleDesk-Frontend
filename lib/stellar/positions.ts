@@ -94,8 +94,26 @@ export async function fetchPositionsFor(
   // Batch read market entries for markets where user holds positions
   const holdingIds = [...found.keys()];
   const markets = new Map<bigint, Market>();
-  const archivedIds = new Map<bigint, boolean>();
+  const marketTtls = new Map<bigint, number | null>();
+  const positionTtls = new Map<bigint, number | null>();
   let latestLedger = 0;
+
+  for (const idChunk of chunks(holdingIds, LEDGER_ENTRY_CHUNK_SIZE)) {
+    const keys = idChunk.map((id) => ({ id, key: positionLedgerKey(id, holder) }));
+    try {
+      const resp = await server.getLedgerEntries(...keys.map(({ key }) => key));
+      latestLedger = Math.max(latestLedger, resp.latestLedger);
+      const idByKey = new Map(keys.map(({ id, key }) => [key.toXDR("base64"), id]));
+      for (const entry of resp.entries) {
+        const id = idByKey.get(entry.key.toXDR("base64"));
+        if (id !== undefined) {
+          positionTtls.set(id, entry.liveUntilLedgerSeq ?? null);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   for (const idChunk of chunks(holdingIds, LEDGER_ENTRY_CHUNK_SIZE)) {
     const keys = idChunk.map((id) => ({ id, key: marketLedgerKey(id) }));
@@ -110,7 +128,7 @@ export async function fetchPositionsFor(
           const market = readUdt<unknown>("Market", entry.val.contractData().val());
           if (isMarket(market)) {
             markets.set(id, market);
-            archivedIds.set(id, entry.liveUntilLedgerSeq !== undefined && entry.liveUntilLedgerSeq < latestLedger);
+            marketTtls.set(id, entry.liveUntilLedgerSeq ?? null);
           }
         } catch {
           // ignore unreadable market entries
@@ -126,6 +144,12 @@ export async function fetchPositionsFor(
       const market = markets.get(marketId) ?? null;
       const settlement = market ? settlementOf(market.status) : null;
       const valuation = market ? positionValue(position, market) : null;
+      const posLive = positionTtls.get(marketId) ?? null;
+      const mktLive = marketTtls.get(marketId) ?? null;
+      const posArchived = posLive !== null ? posLive < latestLedger : false;
+      const mktArchived = mktLive !== null ? mktLive < latestLedger : false;
+      const archived = posArchived || mktArchived;
+
       return {
         marketId,
         yes: position.yes,
@@ -134,7 +158,23 @@ export async function fetchPositionsFor(
         settlement,
         valueRaw: valuation?.valueRaw ?? null,
         yesBps: valuation?.yesBps ?? null,
-        archived: archivedIds.get(marketId) ?? false,
+        archived,
+        ttl: {
+          position: {
+            key: positionLedgerKey(marketId, holder),
+            kind: "position" as const,
+            marketId,
+            liveUntil: posLive,
+            latestLedger,
+          },
+          market: {
+            key: marketLedgerKey(marketId),
+            kind: "market" as const,
+            marketId,
+            liveUntil: mktLive,
+            latestLedger,
+          },
+        },
       };
     })
     .sort((a, b) => (a.marketId < b.marketId ? 1 : a.marketId > b.marketId ? -1 : 0));

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "kind": "oracledesk.trace",
+  "traceId": "b1f2c3d4-e5f6-7890-abcd-ef1234567890",
+  "agentType": "trader",
+  "decisionType": "buy",
+  "action": "buy",
+  "probabilityEstimate": 0.64,
+  "marketProbability": 0.55,
+  "edge": 0.09,
+  "confidenceInterval": { "lower": 0.58, "upper": 0.70 },
+  "sourcesUsed": [
+    { "name": "Reuters", "weight": 0.6, "signal": "positive economic data", "url": "https://reuters.com/example" },
+    { "name": "Bloomberg", "weight": 0.4, "signal": "analyst consensus bullish", "url": "https://bloomberg.com/example" }
+  ],
+  "betFraction": 0.1,
+  "betSizeUsdc": 50.0,
+  "hedgeConditions": ["If inflation exceeds 4%, reduce position"],
+  "agentWallet": "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
+  "createdAt": "2026-11-15T10:30:00Z",
+  "reasoning": "Economic indicators point to positive outcome based on current data.",
+  "marketId": "42",
+  "strict": true
+}

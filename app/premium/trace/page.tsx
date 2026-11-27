@@ -14,6 +14,7 @@ import type { TxPhase } from "@/lib/stellar/tx-lifecycle";
 import type { ReviewModel } from "@/lib/stellar/tx-decode";
 import { TxReview, TxReviewPreferenceControl, shouldSkipTxReview } from "@/components/tx-review";
 import { SafeText } from "@/components/safe-text";
+import { parsePremiumTraceParams, routes } from "@/lib/routes";
 import {
   deriveDailyPassExpiry,
   deriveUnlockRoutes,
@@ -99,7 +100,8 @@ export default function UnlockPremiumTracePage() {
 
 function UnlockPremiumTraceContent() {
   const searchParams = useSearchParams();
-  const traceId = searchParams.get("traceId");
+  const parsedParams = parsePremiumTraceParams(searchParams);
+  const traceId = parsedParams.ok ? parsedParams.traceId : null;
 
   const { address, isConnected, isWrongNetwork, openModal, ensureSession } = useWallet();
   const traceQuery = useTrace(traceId ?? undefined);
@@ -202,7 +204,7 @@ function UnlockPremiumTraceContent() {
         <p className="text-body-md text-on-surface-variant mb-6">
           Open this page from a reasoning trace to see its access state, prices and payment receipts.
         </p>
-        <Link href="/reasoning" className="bg-primary text-on-primary px-6 py-2 rounded-lg font-label-caps uppercase">
+        <Link href={routes.reasoning()} className="bg-primary text-on-primary px-6 py-2 rounded-lg font-label-caps uppercase">
           Browse reasoning traces
         </Link>
       </main>
@@ -225,7 +227,7 @@ function UnlockPremiumTraceContent() {
         <p className="text-body-md text-on-surface-variant mb-6">
           {traceQuery.error instanceof Error ? traceQuery.error.message : "We couldn't load this reasoning trace."}
         </p>
-        <Link href="/reasoning" className="bg-primary text-on-primary px-6 py-2 rounded-lg font-label-caps uppercase">
+        <Link href={routes.reasoning()} className="bg-primary text-on-primary px-6 py-2 rounded-lg font-label-caps uppercase">
           Back to reasoning
         </Link>
       </main>

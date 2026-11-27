@@ -9,6 +9,9 @@ import {
   type TxDescribedError,
 } from "./errors";
 import { integrityMonitor } from "./integrity-monitor";
+import type { TransactionDeadline } from "./deadline";
+
+const SUPERSEDED_MESSAGE = "This signature was replaced by a newer request and was not submitted.";
 
 export type { TxDescribedError };
 
@@ -44,7 +47,7 @@ export function decodeInvoke(envelope: xdr.TransactionEnvelope): { contractId: s
 export type TxPhase =
   | { name: "building" }
   | { name: "simulating" }
-  | { name: "awaiting-signature" }
+  | { name: "awaiting-signature"; deadline?: TransactionDeadline }
   | { name: "submitting"; hash: string }
   | { name: "pending"; hash: string; sentAt: number; attempts: number }
   | { name: "confirmed"; hash: string; ledger: number; returnValue?: xdr.ScVal }
@@ -75,6 +78,8 @@ export class TxLifecycle<T> {
   private phase: TxPhase = { name: "building" };
   private listeners = new Set<() => void>();
   private aborted = false;
+  /** Incremented per signing attempt; a signature from a superseded attempt is never submitted. */
+  private attempt = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private readonly getServer: () => rpc.Server;
   private readonly contract: ContractName;
@@ -120,6 +125,11 @@ export class TxLifecycle<T> {
     }
   }
 
+  /** Invalidates the signature still pending in the wallet (e.g. "Need more time"). */
+  supersedeSigning(): void {
+    this.attempt++;
+  }
+
   abort(): void {
     this.aborted = true;
     if (this.timer) {
@@ -135,6 +145,8 @@ export class TxLifecycle<T> {
     beforeSubmit?: () => void | Promise<void>,
     /** Called immediately before the wallet prompt opens (analytics, issue #125). */
     onPrompt?: () => void,
+    /** Deadline the transaction was built with; shown as a countdown while signing. */
+    deadline?: TransactionDeadline,
   ): Promise<{ value: T; txHash: string; ledger: number }> {
     // 1. Simulating
     this.setPhase({ name: "simulating" });
@@ -164,15 +176,21 @@ export class TxLifecycle<T> {
     }
 
     // 2. Awaiting signature
-    this.setPhase({ name: "awaiting-signature" });
+    const attempt = ++this.attempt;
+    this.setPhase({ name: "awaiting-signature", deadline });
     try {
       onPrompt?.();
       await tx.sign();
       await beforeSubmit?.();
     } catch (err) {
+      if (attempt !== this.attempt) throw new UserFacingError({ kind: "unknown", message: SUPERSEDED_MESSAGE }, err);
       const described: TxDescribedError = describeError(err, this.contract);
       this.setPhase({ name: "failed", hash: null, error: described });
       throw new UserFacingError(described, err);
+    }
+
+    if (attempt !== this.attempt) {
+      throw new UserFacingError({ kind: "unknown", message: SUPERSEDED_MESSAGE });
     }
 
     const signed = (tx as unknown as { signed?: { hash: () => Buffer; timeBounds?: { maxTime?: string | number } } }).signed;

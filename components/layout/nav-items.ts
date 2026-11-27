@@ -1,12 +1,14 @@
+import type { Route } from "next";
 import type { MessageKey } from "@/lib/i18n";
+import { routes } from "@/lib/routes";
 
 export interface NavItem {
   /** English label; surfaces outside the migrated navbar (command palette, mobile nav) still read it. */
   label: string;
   /** Catalog key the navbar renders through `t()`. */
   labelKey: MessageKey;
-  href: string;
-  children?: { label: string; labelKey: MessageKey; href: string }[];
+  href: Route;
+  children?: { label: string; labelKey: MessageKey; href: Route }[];
   /** Permission required to view this item in navigation (RBAC) */
   permission?: "admin.read";
 }
@@ -14,33 +16,34 @@ export interface NavItem {
 export const NAV_ITEMS: readonly NavItem[] = [
   {
     label: "Markets", labelKey: "nav.markets",
-    href: "/markets",
+    href: routes.markets(),
     children: [
-      { label: "Live Terminal", labelKey: "nav.liveTerminal", href: "/markets/terminal" },
-      { label: "Active Market Detail", labelKey: "nav.activeMarketDetail", href: "/market" },
-      { label: "FPMM Explainer", labelKey: "nav.fpmmExplainer", href: "/learn/fpmm" },
+      { label: "Live Terminal", labelKey: "nav.liveTerminal", href: routes.marketsTerminal() },
+      { label: "Active Market Detail", labelKey: "nav.activeMarketDetail", href: routes.market() },
+      { label: "FPMM Explainer", labelKey: "nav.fpmmExplainer", href: routes.learnFpmm() },
+      { label: "Glossary", labelKey: "nav.glossary", href: routes.glossary() },
     ],
   },
   {
     label: "Reasoning", labelKey: "nav.reasoning",
-    href: "/reasoning",
+    href: routes.reasoning(),
   },
   {
     label: "Portfolio", labelKey: "nav.portfolio",
-    href: "/portfolio",
+    href: routes.portfolio(),
     children: [
-      { label: "Active Positions", labelKey: "nav.activePositions", href: "/portfolio" },
-      { label: "Analytics", labelKey: "nav.analytics", href: "/portfolio/analytics" },
-      { label: "Portfolio & Assets", labelKey: "nav.portfolioAssets", href: "/portfolio/wallets" },
+      { label: "Active Positions", labelKey: "nav.activePositions", href: routes.portfolio() },
+      { label: "Analytics", labelKey: "nav.analytics", href: routes.portfolioAnalytics() },
+      { label: "Portfolio & Assets", labelKey: "nav.portfolioAssets", href: routes.portfolioWallets() },
     ],
   },
   {
     label: "Stats", labelKey: "nav.stats",
-    href: "/stats",
+    href: routes.stats(),
   },
   {
     label: "Admin", labelKey: "nav.admin",
-    href: "/admin",
+    href: routes.admin(),
     permission: "admin.read",
   },
 ] as const;

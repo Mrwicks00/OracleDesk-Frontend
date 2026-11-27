@@ -7,6 +7,7 @@ import Link from "next/link";
 import { TradeAttributionView } from "@/components/trade-attribution-view";
 import { TradeAttributionMatch, attributeTradesToTraces, flagUnattributedTrades, convertTraceToRecord } from "@/lib/services/trade-attribution";
 import { listTraces } from "@/lib/api/traces";
+import { parseBackendMarketId, parseOnChainMarketId, routes } from "@/lib/routes";
 
 export function generateStaticParams() {
   return [{ id: "fallback" }];
@@ -63,11 +64,19 @@ export default function MarketTradesPage() {
     loadTradeAttributions();
   }, [marketId]);
 
+  const parsedOnChainId = parseOnChainMarketId(marketId);
+  const parsedBackendId = parseBackendMarketId(marketId);
+  const backHref = parsedBackendId
+    ? routes.marketsQuickView({ marketId: parsedBackendId })
+    : parsedOnChainId
+      ? routes.market({ onChainId: parsedOnChainId })
+      : routes.markets();
+
   return (
     <main className="pt-24 pb-12 px-gutter max-w-container-max-width mx-auto">
       <div className="mb-8">
         <Link
-          href={`/market?id=${marketId}`}
+          href={backHref}
           className="flex items-center gap-2 text-primary hover:underline mb-4 font-label-caps text-label-caps"
         >
           <Icon name="arrow_back" className="text-base" />

@@ -4,6 +4,7 @@ import { Icon, type IconName } from "@/components/ui/icon";
 import React from "react";
 import Link from "next/link";
 import { AgentProfile } from "@/lib/services/agent-profile";
+import { parseAgentAddress, parseBackendMarketId, routes } from "@/lib/routes";
 
 interface AgentProfileCardProps {
   profile: AgentProfile;
@@ -120,12 +121,17 @@ export function AgentProfileCard({ profile }: AgentProfileCardProps) {
               <Icon name="history" />
               Recent Reasoning Traces
             </span>
-            <Link
-              href={`/agent/${encodeURIComponent(profile.agentAddress)}`}
-              className="text-primary text-xs hover:underline"
-            >
-              View All
-            </Link>
+            {(() => {
+              const parsedAgent = parseAgentAddress(profile.agentAddress) ?? parseBackendMarketId(profile.agentAddress);
+              return parsedAgent ? (
+                <Link
+                  href={routes.agent(parsedAgent)}
+                  className="text-primary text-xs hover:underline"
+                >
+                  View All
+                </Link>
+              ) : null;
+            })()}
           </h3>
 
           <div className="space-y-3">

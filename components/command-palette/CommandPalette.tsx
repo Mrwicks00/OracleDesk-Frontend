@@ -43,18 +43,20 @@ interface CommandItem {
 
 // ─── static items ────────────────────────────────────────────────────────────
 
+import { parseOnChainMarketId, parseTraceId, routes } from "@/lib/routes";
+
 function useStaticItems(
   router: ReturnType<typeof useRouter>,
   address: string | null,
   actions: ReturnType<typeof useWalletActions>,
 ): CommandItem[] {
   return [
-    { id: "nav-markets", label: "Go to Markets", icon: "bar_chart", group: "nav", onSelect: () => router.push("/markets") },
-    { id: "nav-portfolio", label: "Go to Portfolio", icon: "account_balance_wallet", group: "nav", onSelect: () => router.push("/portfolio") },
-    { id: "nav-reasoning", label: "Go to Reasoning", icon: "psychology", group: "nav", onSelect: () => router.push("/reasoning") },
-    { id: "nav-stats", label: "Go to Stats", icon: "analytics", group: "nav", onSelect: () => router.push("/stats") },
-    { id: "nav-premium", label: "Go to Premium", icon: "workspace_premium", group: "nav", onSelect: () => router.push("/premium") },
-    { id: "nav-settings", label: "Go to Settings", icon: "settings", group: "nav", onSelect: () => router.push("/settings") },
+    { id: "nav-markets", label: "Go to Markets", icon: "bar_chart", group: "nav", onSelect: () => router.push(routes.markets()) },
+    { id: "nav-portfolio", label: "Go to Portfolio", icon: "account_balance_wallet", group: "nav", onSelect: () => router.push(routes.portfolio()) },
+    { id: "nav-reasoning", label: "Go to Reasoning", icon: "psychology", group: "nav", onSelect: () => router.push(routes.reasoning()) },
+    { id: "nav-stats", label: "Go to Stats", icon: "analytics", group: "nav", onSelect: () => router.push(routes.stats()) },
+    { id: "nav-premium", label: "Go to Premium", icon: "workspace_premium", group: "nav", onSelect: () => router.push(routes.premium()) },
+    { id: "nav-settings", label: "Go to Settings", icon: "settings", group: "nav", onSelect: () => router.push(routes.settings()) },
     ...(address
       ? [
           {
@@ -158,7 +160,10 @@ export function CommandPalette() {
       description: m.category,
       icon: "bar_chart",
       group: "market" as const,
-      onSelect: () => router.push(m.onChainMarketId ? `/market?onChainId=${m.onChainMarketId}` : `/markets`),
+      onSelect: () => {
+        const chainId = m.onChainMarketId ? parseOnChainMarketId(m.onChainMarketId) : null;
+        router.push(chainId ? routes.market({ onChainId: chainId }) : routes.markets());
+      },
     }));
 
   const traceItems: CommandItem[] = (tracesData?.traces ?? [])
@@ -169,7 +174,10 @@ export function CommandPalette() {
       label: "question" in t ? (t.question as string) : t.id,
       icon: "psychology",
       group: "trace" as const,
-      onSelect: () => router.push(`/reasoning/verify?traceId=${t.id}`),
+      onSelect: () => {
+        const traceId = parseTraceId(t.id);
+        router.push(traceId ? routes.reasoningVerify({ traceId }) : routes.reasoning());
+      },
     }));
 
   // ── filter and group ───────────────────────────────────────────────────────

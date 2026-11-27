@@ -10,6 +10,7 @@ import { rpcServer } from "@/lib/stellar/clients";
 import { explorerTx } from "@/lib/stellar/config";
 import { formatXlm } from "@/lib/stellar/units";
 import { describeError } from "@/lib/stellar/errors";
+import { parseTxParams } from "@/lib/routes";
 
 export default function TxPage() {
   return (
@@ -27,9 +28,10 @@ export default function TxPage() {
 
 function TxContent() {
   const searchParams = useSearchParams();
+  const parsed = parseTxParams(searchParams);
   const rawHash = searchParams.get("hash")?.trim() ?? "";
-  const isValidHex64 = /^[0-9a-fA-F]{64}$/.test(rawHash);
-  const hash = isValidHex64 ? rawHash.toLowerCase() : null;
+  const isValidHex64 = parsed.ok && parsed.hash !== null;
+  const hash = parsed.ok ? parsed.hash : null;
 
   const [copied, setCopied] = useState(false);
 

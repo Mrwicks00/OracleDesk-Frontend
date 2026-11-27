@@ -172,7 +172,7 @@ export class LedgerClock {
     this.notify(info);
   }
 
-  private averageCloseSeconds(): number {
+  averageCloseSeconds(): number {
     if (this.samples.length < 2) return this.opts.avgCloseSeconds ?? 5.5;
     let elapsed = 0;
     let ledgers = 0;
@@ -183,6 +183,15 @@ export class LedgerClock {
       ledgers += after.sequence - before.sequence;
     }
     return ledgers > 0 ? elapsed / ledgers : this.opts.avgCloseSeconds ?? 5.5;
+  }
+
+  getLedgerSpeed(): { mean: number; min: number; max: number } {
+    const mean = this.averageCloseSeconds();
+    return {
+      mean,
+      min: Math.max(1, Math.round(mean * 0.8 * 10) / 10),
+      max: Math.round(mean * 1.4 * 10) / 10,
+    };
   }
 
   private notify(info?: LedgerInfo): void {

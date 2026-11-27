@@ -1,0 +1,52 @@
+name: Check API Docs
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  check-api-docs:
+    name: Verify docs/api.md against pinned backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Read pinned backend commit
+        id: backend-ref
+        run: |
+          COMMIT=$(node -e "console.log(require('./docs/backend-ref.json').commit)")
+          REPO=$(node -e "console.log(require('./docs/backend-ref.json').repository)")
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+          echo "repo=$REPO" >> "$GITHUB_OUTPUT"
+
+      # Requires secrets.BACKEND_READ_TOKEN (fine-grained PAT or deploy key with contents:read)
+      # when OracleDesk/OracleDesk-Backend is private.
+      - name: Checkout pinned backend commit
+        if: steps.backend-ref.outputs.commit != 'PENDING_PINNED_COMMIT_SHA'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: ${{ steps.backend-ref.outputs.repo }}
+          ref: ${{ steps.backend-ref.outputs.commit }}
+          path: backend-checkout
+          token: ${{ secrets.BACKEND_READ_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Install dependencies (for TypeScript compiler API)
+        run: npm ci --ignore-scripts --legacy-peer-deps
+
+      - name: Check docs/api.md staleness
+        run: |
+          if [ -d backend-checkout ]; then
+            node scripts/check-api-doc.mjs --backend ./backend-checkout
+          else
+            node scripts/check-api-doc.mjs
+          fi

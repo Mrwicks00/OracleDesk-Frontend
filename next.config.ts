@@ -71,6 +71,11 @@ const nextConfig: NextConfig = {
   output: "export",
 
   /**
+   * Next.js 16 typed routes: validates internal Link/router targets at compile time.
+   */
+  typedRoutes: true,
+
+  /**
    * Enforce deterministic build id exposed to application and service worker.
    */
   generateBuildId: async () => DETERMINISTIC_BUILD_ID,

@@ -16,10 +16,12 @@ import {
 } from "@/lib/format/money";
 import { useTreasuryValuation } from "@/lib/portfolio/useValuation";
 import { formatUsdc, shortAddress } from "@/lib/stellar/units";
+import { validateWatchAddress } from "@/lib/stellar/identity";
+import { useFormErrors, ErrorSummary, Field, FieldError, FormStatus } from "@/components/ui/form-errors";
 import { NETWORK_LABEL } from "@/lib/stellar/config";
 import deployments from "@/lib/stellar/generated/deployments.testnet.json";
 import { useWallet } from "@/lib/contexts/WalletContext";
-import { useRedeemAll, type PreparedWriteReview } from "@/lib/hooks/useStellar";
+import { useRedeemAll, reviewPreparedWrite, submitPrepared, type PreparedWriteReview } from "@/lib/hooks/useStellar";
 import { shouldSkipTxReview, TxReview, TxReviewPreferenceControl } from "@/components/tx-review";
 import type { ReviewModel } from "@/lib/stellar/tx-decode";
 import { TreasuryRiskLimits } from "@/components/treasury-risk-limits";
@@ -31,6 +33,13 @@ import { AddressInput } from "@/components/ui/address-input";
 import { AddressText } from "@/components/ui/address-text";
 import { knownAddresses } from "@/lib/stellar/address-book";
 import { classify, type PolicyCheckedAddress } from "@/lib/stellar/address-policy";
+import { useQueryClient } from "@tanstack/react-query";
+import { useSettings } from "@/lib/settings/useSettings";
+import { estimateTtl, prepareExtendTtl, prepareRestore, type EntryTtl, type TtlEstimate } from "@/lib/stellar/ttl";
+import { ledgerClock } from "@/lib/stellar/ledger-clock";
+import { marketLedgerKey, positionLedgerKey } from "@/lib/stellar/ledger-entries";
+import { describeError } from "@/lib/stellar/errors";
+import { xdr } from "@stellar/stellar-sdk";
 
 const TerminalLog = () => {
   const [logs, setLogs] = useState([
@@ -325,6 +334,7 @@ export default function PortfolioPage() {
   const { viewed, isWatching, pendingWatch, confirmPendingWatch, dismissPendingWatch, setWatch, clearWatch } = useViewedAddress();
   const [watchInput, setWatchInput] = useState("");
   const [validatedWatch, setValidatedWatch] = useState<PolicyCheckedAddress | null>(null);
+  const watchForm = useFormErrors(["watchAddress"] as const);
   const known = knownAddresses(wallet.address);
   const activeHolder = viewed ?? wallet.address;
   const addressPositions = useAddressPositions(activeHolder);
@@ -376,6 +386,94 @@ export default function PortfolioPage() {
     reviewResolver.current = null;
     resolve?.(approved);
   }, []);
+
+  const queryClient = useQueryClient();
+  const { settings } = useSettings(wallet.address);
+  const [selectedMarketIds, setSelectedMarketIds] = useState<Set<string>>(new Set());
+  const [horizonDays, setHorizonDays] = useState<number>(90);
+  const [isExtending, setIsExtending] = useState(false);
+  const [extendError, setExtendError] = useState<string | null>(null);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+
+  const toggleMarketSelection = (id: string) => {
+    setSelectedMarketIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    const unarchived = addressPositions.rows.filter((r) => !r.archived);
+    if (selectedMarketIds.size === unarchived.length) {
+      setSelectedMarketIds(new Set());
+    } else {
+      setSelectedMarketIds(new Set(unarchived.map((r) => r.marketId.toString())));
+    }
+  };
+
+  const handleKeepAlive = async () => {
+    if (selectedMarketIds.size === 0 || !activeHolder || isWatching) return;
+    setIsExtending(true);
+    setExtendError(null);
+    try {
+      const speed = ledgerClock.getLedgerSpeed();
+      const latestSeq = addressPositions.rows[0]?.ttl?.position.latestLedger ?? (await ledgerClock.getSequence() ?? 1000);
+      const extendToLedgers = latestSeq + Math.round((horizonDays * 86400) / speed.mean);
+
+      const keys: xdr.LedgerKey[] = [];
+      const knownLiveUntil = new Map<string, number>();
+      for (const idStr of selectedMarketIds) {
+        const row = addressPositions.rows.find((r) => r.marketId.toString() === idStr);
+        if (!row) continue;
+        const posKey = row.ttl?.position.key ?? positionLedgerKey(row.marketId, activeHolder);
+        const mktKey = row.ttl?.market.key ?? marketLedgerKey(row.marketId);
+        keys.push(posKey, mktKey);
+        if (row.ttl?.position.liveUntil !== null && row.ttl?.position.liveUntil !== undefined) {
+          knownLiveUntil.set(posKey.toXDR("base64"), row.ttl.position.liveUntil);
+        }
+        if (row.ttl?.market.liveUntil !== null && row.ttl?.market.liveUntil !== undefined) {
+          knownLiveUntil.set(mktKey.toXDR("base64"), row.ttl.market.liveUntil);
+        }
+      }
+
+      const initial = await prepareExtendTtl(activeHolder, keys, extendToLedgers, { knownLiveUntil });
+      const reviewed = await reviewPreparedWrite(initial, reviewRedeem, () =>
+        prepareExtendTtl(activeHolder, keys, extendToLedgers, { knownLiveUntil }),
+      );
+      await submitPrepared(reviewed.prepared);
+      setSelectedMarketIds(new Set());
+      await queryClient.invalidateQueries({ queryKey: ["stellar"] });
+    } catch (err) {
+      setExtendError(describeError(err).message);
+    } finally {
+      setIsExtending(false);
+    }
+  };
+
+  const handleRestoreSingle = async (row: (typeof addressPositions.rows)[0]) => {
+    if (!activeHolder || isWatching) return;
+    const idStr = row.marketId.toString();
+    setRestoringId(idStr);
+    setRestoreError(null);
+    try {
+      const posKey = row.ttl?.position.key ?? positionLedgerKey(row.marketId, activeHolder);
+      const mktKey = row.ttl?.market.key ?? marketLedgerKey(row.marketId);
+      const keys = [posKey, mktKey];
+      const initial = await prepareRestore(activeHolder, keys);
+      const reviewed = await reviewPreparedWrite(initial, reviewRedeem, () =>
+        prepareRestore(activeHolder, keys),
+      );
+      await submitPrepared(reviewed.prepared);
+      await queryClient.invalidateQueries({ queryKey: ["stellar"] });
+    } catch (err) {
+      setRestoreError(describeError(err).message);
+    } finally {
+      setRestoringId(null);
+    }
+  };
 
   useEffect(
     () => () => {
@@ -551,21 +649,47 @@ export default function PortfolioPage() {
 
         {/* Address Input & Quick Picks */}
         <div className="bg-surface-container-low border border-outline-variant rounded-xl p-4 mb-4">
+          <ErrorSummary
+            errors={watchForm.errors}
+            formError={watchForm.formError}
+            ids={watchForm.ids}
+            labels={{ watchAddress: "Watch address" }}
+            summaryRef={watchForm.summaryRef}
+            className="mb-3"
+          />
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              if (!validatedWatch) return;
-              if (setWatch(validatedWatch, { internal: true })) {
+              const valid = watchForm.attemptSubmit(() => {
+                const res: Partial<Record<"watchAddress", string>> = {};
+                const val = validateWatchAddress(watchInput);
+                if (!val.ok) {
+                  res.watchAddress = val.error;
+                }
+                return res;
+              });
+              if (!valid) return;
+              const val = validateWatchAddress(watchInput);
+              if (!val.ok) return;
+              if (setWatch(val.address, { internal: true })) {
+                watchForm.announceSettled("watch", `Now viewing ${shortAddress(val.address, 4, 4)} in watch-only mode`);
                 setWatchInput("");
                 setValidatedWatch(null);
+                watchForm.clearErrors();
               }
             }}
             className="flex flex-col sm:flex-row items-start gap-2 mb-3"
           >
-            <div className="flex-1 w-full">
+            <Field className="flex-1 w-full">
               <AddressInput
+                id={watchForm.ids.watchAddress.input}
                 value={watchInput}
-                onChange={setWatchInput}
+                onChange={(val) => {
+                  setWatchInput(val);
+                  if (watchForm.errors.watchAddress) {
+                    watchForm.clearErrors();
+                  }
+                }}
                 onValidated={setValidatedWatch}
                 policy="watch"
                 expect="any"
@@ -573,15 +697,19 @@ export default function PortfolioPage() {
                 placeholder="Watch an address (G... or C...)"
                 ariaLabel="Watch an address"
               />
-            </div>
+              <FieldError
+                id={watchForm.ids.watchAddress.error}
+                message={watchForm.errors.watchAddress}
+              />
+            </Field>
             <button
               type="submit"
-              disabled={!validatedWatch}
-              className="bg-primary text-primary-foreground px-4 py-2 rounded-lg text-xs font-bold font-label-caps hover:brightness-110 transition-all shrink-0 disabled:opacity-50"
+              className="bg-primary text-primary-foreground px-4 py-2 rounded-lg text-xs font-bold font-label-caps hover:brightness-110 transition-all shrink-0"
             >
               Watch
             </button>
           </form>
+          <FormStatus message={watchForm.statusMessage} />
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <span className="text-[11px] text-on-surface-variant font-medium">Quick picks:</span>
             {wallet.isConnected && wallet.address && (
@@ -646,46 +774,174 @@ export default function PortfolioPage() {
                 : "This address holds no position shares on-chain."}
             </p>
           ) : (
-            <ul className="divide-y divide-outline-variant">
-              {addressPositions.rows.map((row) => {
-                const settled = row.settlement !== null;
-                return (
-                  <li key={row.marketId.toString()} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-6 py-3">
-                    <span className="max-w-xl flex-1 truncate font-body-md text-body-md font-semibold text-on-surface">
-                      {row.question ?? `Market #${row.marketId.toString()}`}
-                    </span>
-                    <span className="font-data-mono text-data-mono text-on-surface-variant">
-                      {row.yes > 0n ? `${formatUsdc(row.yes, { maxDecimals: 2, grouping: true })} YES` : ""}
-                      {row.yes > 0n && row.no > 0n ? " · " : ""}
-                      {row.no > 0n ? `${formatUsdc(row.no, { maxDecimals: 2, grouping: true })} NO` : ""}
-                    </span>
-                    {row.yesBps !== null && (
-                      <span className="font-data-mono text-data-mono text-on-surface-variant">
-                        YES {row.yesBps / 100}%
+            <>
+              {addressPositions.rows.length > 0 && !isWatching && wallet.isConnected && (
+                <div className="border-b border-outline-variant bg-surface-container/30 px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="select-all-positions"
+                      aria-label="Select all unarchived positions for storage extension"
+                      checked={
+                        selectedMarketIds.size > 0 &&
+                        selectedMarketIds.size === addressPositions.rows.filter((r) => !r.archived).length
+                      }
+                      onChange={toggleSelectAll}
+                      className="rounded border-outline cursor-pointer"
+                    />
+                    <label htmlFor="select-all-positions" className="font-medium text-on-surface cursor-pointer">
+                      Select all
+                    </label>
+                    {selectedMarketIds.size > 0 && (
+                      <span className="text-on-surface-variant font-data-mono ms-1">
+                        ({selectedMarketIds.size} selected)
                       </span>
                     )}
-                    <span className="font-data-mono text-data-mono font-semibold text-on-background">
-                      {row.valueRaw === null ? "—" : `${formatUsdc(row.valueRaw, { maxDecimals: 2, grouping: true })} USDC`}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
-                        row.settlement === "yes" || row.settlement === "no"
-                          ? "bg-secondary-container text-on-secondary-container"
-                          : row.settlement === "void"
-                            ? "bg-surface-container-highest text-on-surface-variant"
-                            : "bg-primary-container text-on-primary-container"
-                      }`}>
-                        {settled ? `Settled · ${row.settlement}` : "Open"}
-                      </span>
-                      <SourceTag source="chain" />
+                  </div>
+
+                  {selectedMarketIds.size > 0 && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label htmlFor="ttl-horizon-select" className="text-on-surface-variant font-medium">
+                        Extend by:
+                      </label>
+                      <select
+                        id="ttl-horizon-select"
+                        aria-label="Choose storage extension horizon"
+                        value={horizonDays}
+                        onChange={(e) => setHorizonDays(Number(e.target.value))}
+                        className="rounded border border-outline-variant bg-surface px-2 py-1 text-xs text-on-surface font-semibold"
+                      >
+                        <option value={30}>30 days</option>
+                        <option value={60}>60 days</option>
+                        <option value={90}>90 days</option>
+                        <option value={180}>180 days</option>
+                      </select>
+                      <button
+                        type="button"
+                        data-testid="keep-alive-btn"
+                        disabled={isExtending}
+                        onClick={() => void handleKeepAlive()}
+                        className="rounded bg-primary px-3 py-1 font-semibold text-on-primary disabled:opacity-50"
+                      >
+                        {isExtending ? "Extending…" : "Keep alive"}
+                      </button>
                     </div>
-                    {row.archived && (
-                      <span className="font-data-mono text-[10px] text-outline">archived</span>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
+                  )}
+                </div>
+              )}
+              <p className="px-6 py-1.5 text-[11px] text-on-surface-variant border-b border-outline-variant italic">
+                Storage extension preserves entry availability on-chain, but does not extend redemption or claim deadlines. Unredeemed shares remain subject to market settlement forfeiture.
+              </p>
+              {extendError && (
+                <p className="px-6 py-2 text-xs text-error border-b border-outline-variant" role="alert">{extendError}</p>
+              )}
+              {restoreError && (
+                <p className="px-6 py-2 text-xs text-error border-b border-outline-variant" role="alert">{restoreError}</p>
+              )}
+              <ul className="divide-y divide-outline-variant">
+                {addressPositions.rows.map((row) => {
+                  const settled = row.settlement !== null;
+                  const speed = ledgerClock.getLedgerSpeed();
+                  const posTtl = row.ttl?.position ? estimateTtl(row.ttl.position, speed) : null;
+                  const mktTtl = row.ttl?.market ? estimateTtl(row.ttl.market, speed) : null;
+                  let sooner: TtlEstimate | null = null;
+                  if (posTtl && mktTtl) {
+                    sooner = posTtl.ledgersLeft <= mktTtl.ledgersLeft ? posTtl : mktTtl;
+                  } else {
+                    sooner = posTtl ?? mktTtl;
+                  }
+                  const isArchived = row.archived || sooner?.archived;
+                  const thresholds = settings.ttlThresholdsDays ?? [30, 7];
+                  const [warnHigh, warnCrit] = [Math.max(...thresholds), Math.min(...thresholds)];
+                  const daysLeft = sooner ? Math.round(sooner.etaSeconds / 86400) : null;
+                  const minDays = sooner ? Math.round(sooner.etaRangeSeconds[0] / 86400) : null;
+                  const maxDays = sooner ? Math.round(sooner.etaRangeSeconds[1] / 86400) : null;
+
+                  return (
+                    <li key={row.marketId.toString()} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-6 py-3">
+                      <div className="flex items-center gap-3 max-w-xl flex-1 truncate">
+                        {!isWatching && wallet.isConnected && !row.archived && (
+                          <input
+                            type="checkbox"
+                            aria-label={`Select market #${row.marketId.toString()} for storage extension`}
+                            checked={selectedMarketIds.has(row.marketId.toString())}
+                            onChange={() => toggleMarketSelection(row.marketId.toString())}
+                            className="rounded border-outline cursor-pointer"
+                          />
+                        )}
+                        <span className="truncate font-body-md text-body-md font-semibold text-on-surface">
+                          {row.question ?? `Market #${row.marketId.toString()}`}
+                        </span>
+                      </div>
+                      <span className="font-data-mono text-data-mono text-on-surface-variant">
+                        {row.yes > 0n ? `${formatUsdc(row.yes, { maxDecimals: 2, grouping: true })} YES` : ""}
+                        {row.yes > 0n && row.no > 0n ? " · " : ""}
+                        {row.no > 0n ? `${formatUsdc(row.no, { maxDecimals: 2, grouping: true })} NO` : ""}
+                      </span>
+                      {row.yesBps !== null && (
+                        <span className="font-data-mono text-data-mono text-on-surface-variant">
+                          YES {row.yesBps / 100}%
+                        </span>
+                      )}
+                      <span className="font-data-mono text-data-mono font-semibold text-on-background">
+                        {row.valueRaw === null ? "—" : `${formatUsdc(row.valueRaw, { maxDecimals: 2, grouping: true })} USDC`}
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                          row.settlement === "yes" || row.settlement === "no"
+                            ? "bg-secondary-container text-on-secondary-container"
+                            : row.settlement === "void"
+                              ? "bg-surface-container-highest text-on-surface-variant"
+                              : "bg-primary-container text-on-primary-container"
+                        }`}>
+                          {settled ? `Settled · ${row.settlement}` : "Open"}
+                        </span>
+                        <SourceTag source="chain" />
+                      </div>
+                      {isArchived ? (
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            data-testid={`ttl-needs-restore-${row.marketId}`}
+                            className="rounded bg-error-container px-2 py-0.5 text-[10px] font-bold text-tertiary-container"
+                          >
+                            Needs restore
+                          </span>
+                          {!isWatching && wallet.isConnected && (
+                            <button
+                              type="button"
+                              data-testid={`restore-entry-${row.marketId}`}
+                              disabled={restoringId === row.marketId.toString()}
+                              onClick={() => void handleRestoreSingle(row)}
+                              className="rounded border border-outline-variant px-2 py-0.5 text-[10px] font-semibold text-primary hover:bg-surface-container"
+                            >
+                              {restoringId === row.marketId.toString() ? "Restoring…" : "Restore"}
+                            </button>
+                          )}
+                        </div>
+                      ) : sooner && (row.ttl?.position?.liveUntil !== null || row.ttl?.market?.liveUntil !== null) ? (
+                        <span
+                          data-testid={`ttl-badge-${row.marketId}`}
+                          title={`Storage expires in ~${daysLeft} days (estimated range: ${minDays}–${maxDays} days)`}
+                          className={`rounded px-2 py-0.5 text-[10px] ${
+                            daysLeft !== null && daysLeft <= warnCrit
+                              ? "bg-error/20 font-bold text-error border border-error/40"
+                              : daysLeft !== null && daysLeft <= warnHigh
+                                ? "bg-warning/20 font-semibold text-warning border border-warning/40"
+                                : "font-data-mono text-outline"
+                          }`}
+                        >
+                          Storage expires in ~{daysLeft} days
+                        </span>
+                      ) : (
+                        <span data-testid={`ttl-badge-${row.marketId}`} className="font-data-mono text-[10px] text-outline">
+                          Storage expires: unknown
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           )}
           {reconcileProgress && (
             <div className="border-t border-outline-variant px-6 py-2 flex items-center justify-between text-xs text-on-surface-variant">
@@ -811,6 +1067,23 @@ export default function PortfolioPage() {
         {!wallet.isConnected && <p className="mt-4 text-sm text-on-surface-variant">Connect a Stellar wallet to scan your positions.</p>}
         {wallet.isWrongNetwork && <p className="mt-4 text-sm text-error">Switch your wallet to {NETWORK_LABEL} to redeem positions.</p>}
         {redeemBatch.error && <p className="mt-4 text-sm text-error" role="alert">{redeemBatch.error}</p>}
+
+        {redeemBatch.discovery && redeemBatch.discovery.redeemables.some((item) => item.archived) && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs">
+            <span className="font-semibold text-on-surface">
+              {redeemBatch.discovery.redeemables.filter((item) => item.archived).length} position(s) are archived and require restoring before redemption.
+            </span>
+            <button
+              type="button"
+              data-testid="redeem-restore-archived-btn"
+              disabled={redeemBatch.restoring || redeemBatch.running || !wallet.isConnected}
+              onClick={() => void redeemBatch.restoreArchived?.(reviewRedeem)}
+              className="rounded bg-secondary px-3 py-1 font-semibold text-on-secondary disabled:opacity-50"
+            >
+              {redeemBatch.restoring ? "Restoring archived…" : "Restore archived first"}
+            </button>
+          </div>
+        )}
 
         {redeemBatch.discovery && redeemBatch.discovery.redeemables.length > 0 && (
           <ul className="mt-5 divide-y divide-outline-variant rounded border border-outline-variant">

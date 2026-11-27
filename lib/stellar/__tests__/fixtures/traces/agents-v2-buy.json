@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 2,
+  "agent": "trader",
+  "marketId": "42",
+  "action": "buy",
+  "inputs": {
+    "reserveYes": "5000000000",
+    "reserveNo": "5000000000",
+    "feeBps": 200,
+    "priceYesBps": 5000,
+    "fairValue": {
+      "bps": 6400,
+      "source": "model-v3",
+      "observedAt": "2026-11-15T10:30:00Z"
+    },
+    "order": {
+      "collateralIn": "1000000000",
+      "minSharesOut": "1050000000"
+    },
+    "contracts": {
+      "marketCore": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+    },
+    "ledgerSequence": 54000000,
+    "ledgerCloseTime": 1731667800
+  },
+  "ledgerSequence": 54000000,
+  "ledgerCloseTime": 1731667800,
+  "timestamp": 1731667800
+}

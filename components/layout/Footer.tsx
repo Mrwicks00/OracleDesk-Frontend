@@ -1,4 +1,6 @@
 import React from "react";
+import Link from "next/link";
+import { routes } from "@/lib/routes";
 
 export const Footer = () => {
   return (
@@ -13,6 +15,12 @@ export const Footer = () => {
           </p>
         </div>
         <div className="flex flex-wrap justify-center gap-6">
+          <Link
+            className="text-on-surface-variant font-medium hover:text-primary transition-colors duration-200 font-label-caps text-label-caps"
+            href={routes.glossary()}
+          >
+            Glossary
+          </Link>
           <a
             className="text-on-surface-variant font-medium hover:text-primary transition-colors duration-200 font-label-caps text-label-caps"
             href="#"

@@ -17,6 +17,7 @@ import { DEFAULTS, serializeDiscovery } from "@/lib/markets/discovery-params";
 import { runsInLastHour, saveJob, useAdminJobs, type StoredJob } from "@/lib/admin/job-store";
 import { completedWithoutChain, elapsedFor, formatElapsed, jobFeed, shortJobId, type JobEventTone } from "@/lib/admin/job-events";
 import { JobStatusChip } from "@/components/admin/job-status-chip";
+import { parseBackendMarketId, parseOnChainMarketId, routes } from "@/lib/routes";
 
 /** Backend limit on POST /markets/generate (per IP; each run calls paid LLM APIs). */
 const RUNS_PER_HOUR = 5;
@@ -252,21 +253,27 @@ function JobRow({
 
       {job.question && <p className="font-body-md text-on-surface">{job.question}</p>}
 
-      {job.lastStatus === "COMPLETED" && job.marketId && (
-        <div className="flex flex-wrap items-center gap-4 text-sm">
-          <Link href={`/markets/quick-view?marketId=${encodeURIComponent(job.marketId)}`} className="text-primary font-semibold hover:underline">
-            Open market
-          </Link>
-          {job.onChainMarketId && (
-            <span className="text-on-surface-variant">
-              <Link href={`/market?onChainId=${encodeURIComponent(job.onChainMarketId)}`} className="hover:underline">
-                On-chain #{job.onChainMarketId}
+      {job.lastStatus === "COMPLETED" && job.marketId && (() => {
+        const parsedMarketId = parseBackendMarketId(job.marketId);
+        const parsedChainId = job.onChainMarketId ? parseOnChainMarketId(job.onChainMarketId) : null;
+        return (
+          <div className="flex flex-wrap items-center gap-4 text-sm">
+            {parsedMarketId && (
+              <Link href={routes.marketsQuickView({ marketId: parsedMarketId })} className="text-primary font-semibold hover:underline">
+                Open market
               </Link>
-              <SourceTag source="backend" />
-            </span>
-          )}
-        </div>
-      )}
+            )}
+            {parsedChainId && (
+              <span className="text-on-surface-variant">
+                <Link href={routes.market({ onChainId: parsedChainId })} className="hover:underline">
+                  On-chain #{job.onChainMarketId}
+                </Link>
+                <SourceTag source="backend" />
+              </span>
+            )}
+          </div>
+        );
+      })()}
       {completedWithoutChain(job) && (
         <p className="text-sm text-tertiary">
           Created in the database only. The backend is in dry-run mode or on-chain creation failed; check backend logs.

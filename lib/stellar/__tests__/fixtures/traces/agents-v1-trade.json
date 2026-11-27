@@ -1,0 +1,13 @@
+{
+  "agent": "trader",
+  "marketId": 42,
+  "action": "buy:yes",
+  "reasoning": "Market conditions favor YES outcome based on current signals.",
+  "inputs": {
+    "fairValueBps": 6400,
+    "signal": "bullish",
+    "collateralIn": 1000000000,
+    "slippageBps": 100
+  },
+  "timestamp": 1731667800
+}

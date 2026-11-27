@@ -13,6 +13,7 @@ import {
 import { usePlatformStats } from "@/lib/hooks/usePortfolio";
 import { useTraceCount } from "@/lib/hooks/useStellar";
 import { DIAGNOSTICS_TOLERANCE_BPS } from "@/lib/stellar/config";
+import { parseBackendMarketId, parseOnChainMarketId, parseOnChainTraceId, routes } from "@/lib/routes";
 
 const SourceTag = ({ source }: { source: "chain" | "backend" }) => (
   <span className={`ms-1 text-[9px] font-bold uppercase px-1 rounded ${source === "chain" ? "bg-secondary-container text-on-secondary-container" : "bg-surface-container-highest text-on-surface-variant"}`}>
@@ -20,10 +21,14 @@ const SourceTag = ({ source }: { source: "chain" | "backend" }) => (
   </span>
 );
 
-function diffLink(diff: MarketDiff): string {
-  if (diff.kind === "missing-backend") return `/markets/quick-view?onChainId=${encodeURIComponent(diff.onChainId)}`;
-  if (diff.backendId) return `/markets/quick-view?marketId=${encodeURIComponent(diff.backendId)}`;
-  return `/markets/quick-view?onChainId=${encodeURIComponent(diff.onChainId)}`;
+function diffLink(diff: MarketDiff) {
+  const onChainId = parseOnChainMarketId(diff.onChainId);
+  const backendId = diff.backendId ? parseBackendMarketId(diff.backendId) : null;
+  if (diff.kind === "missing-backend") {
+    return onChainId ? routes.marketsQuickView({ onChainId }) : routes.markets();
+  }
+  if (backendId) return routes.marketsQuickView({ marketId: backendId });
+  return onChainId ? routes.marketsQuickView({ onChainId }) : routes.markets();
 }
 
 function value(value: bigint | number | null): string {
@@ -78,7 +83,7 @@ export function DiagnosticsPanel() {
           <p className="text-sm text-on-surface-variant">
             Compares the backend/indexer with the contracts. Every value is tagged with its source; nothing here is chain data unless it says so.
           </p>
-          <Link href="/admin/reconciliation" className="text-primary underline text-xs">
+          <Link href={routes.adminReconciliation()} className="text-primary underline text-xs">
             Latest backend run
           </Link>
         </div>
@@ -122,11 +127,14 @@ export function DiagnosticsPanel() {
             <div className="pt-2 border-t border-outline-variant text-xs">
               <p className="text-on-surface-variant">Newest trace ids absent from the backend:</p>
               <p className="flex flex-wrap gap-2 mt-1">
-                {traceGaps.map((id) => (
-                  <Link key={id} href={`/reasoning/verify?onChainTraceId=${id}`} className="underline text-primary">
-                    #{id}
-                  </Link>
-                ))}
+                {traceGaps.map((id) => {
+                  const parsed = parseOnChainTraceId(id);
+                  return parsed ? (
+                    <Link key={id} href={routes.reasoningVerify({ onChainTraceId: parsed })} className="underline text-primary">
+                      #{id}
+                    </Link>
+                  ) : null;
+                })}
               </p>
             </div>
           )}

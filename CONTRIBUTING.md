@@ -319,5 +319,19 @@ All errors in OracleDesk use a stable, typed taxonomy with localized messages in
 - **Bidi isolation (`<Ltr>`)**: Wrap Stellar G-addresses, C-contract IDs, transaction hashes, IPFS CIDs, on-chain IDs (`#12`), and amount+unit pairs (`1,234.50 USDC`) in `<Ltr>` (`components/ui/ltr.tsx`) so the bidi algorithm cannot reorder characters in RTL locales.
 - **Icon mirroring**: Pass `mirror` to `<Icon>` for navigation-direction icons (`chevron_right`, `arrow_forward`, `arrow_back`). Do **not** mirror value/flow-semantics icons (`trending_up`, `trending_down`, `north_east`, `south_west`).
 
+## Using Term & Plain-Language Glossary (#305)
+
+To comply with WCAG 2.2 AAA accessibility requirements (3.1.3 Unusual Words and 3.1.4 Abbreviations):
+
+- **Wrap Bare Protocol Vocabulary**: Do not leave bare domain or Stellar jargon unexplained in user-facing JSX text. Use `<Term id="...">{children}</Term>` (`components/ui/term.tsx`).
+- **Available Terms**: Defined in `lib/glossary/terms.ts` (e.g. `slippage`, `limit-price`, `trustline`, `base-reserve`, `xlm`, `usdc`, `sac`, `void`, `trace-hash`, `reasoning-agent`).
+- **Interactive Nesting Protection**: Never nest a `<Term>` trigger button inside another `<button>`. If a term appears within button text, wrap the button children with `<InInteractiveContext.Provider value={true}>` to trigger the accessible non-interactive `<span>` fallback.
+- **Adding New Terms**:
+  1. Add the term ID to `TermId` in `lib/glossary/terms.ts`.
+  2. Provide `short` definition strictly `<= 140` characters (tested in CI).
+  3. Provide `long` markdown description and valid `source` repo path.
+  4. Run `npm test` to verify `lib/glossary/__tests__/terms.test.ts`.
+- **ESLint Enforcement**: `eslint-rules/no-bare-jargon.mjs` checks user-facing JSX text for bare keywords. In non-user-facing test fixtures or code, annotate exceptions with `// bare-jargon-ok`.
+
 
 

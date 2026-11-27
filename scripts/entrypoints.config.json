@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "methods": {
+    "marketCore.claim_pool_remainder": { "kind": "write", "signer": "creator", "allowUnreviewed": false },
+    "marketCore.buy": { "kind": "write", "allowUnreviewed": false },
+    "marketCore.sell": { "kind": "write", "allowUnreviewed": false },
+    "marketCore.redeem": { "kind": "write", "allowUnreviewed": false },
+    "marketCore.quote_buy": { "kind": "read" },
+    "marketCore.quote_sell": { "kind": "read" },
+    "marketCore.get_market": { "kind": "read" },
+    "marketCore.get_market_count": { "kind": "read" },
+    "marketCore.market_count": { "kind": "read" },
+    "marketCore.get_position": { "kind": "read" },
+    "marketCore.get_config": { "kind": "read" },
+    "treasury.daily_usage": { "kind": "read" },
+    "treasury.available_capital": { "kind": "read" },
+    "reasoningRegistry.trace_count": { "kind": "read" },
+    "reasoningRegistry.get_trace": { "kind": "read" },
+    "reasoningRegistry.get_trace_count": { "kind": "read" }
+  },
+  "adminAllowlist": {}
+}

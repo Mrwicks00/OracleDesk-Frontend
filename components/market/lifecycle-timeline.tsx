@@ -6,6 +6,7 @@ import { explorerTx } from "@/lib/stellar/config";
 import type { LifecycleEntry } from "@/lib/stellar/market-lifecycle";
 import { useMarketLifecycle } from "@/lib/hooks/useMarketLifecycle";
 import { Ltr } from "@/components/ui/ltr";
+import { parseRouteTxHash, routes } from "@/lib/routes";
 
 const SOURCE_LABELS: Record<LifecycleEntry["source"], string> = {
   "market-core": "market-core",
@@ -102,12 +103,17 @@ export function LifecycleTimelineView({
               </span>
               {entry.txHash && (
                 <span className="inline-flex items-center gap-2">
-                  <Link
-                    href={`/tx?hash=${encodeURIComponent(entry.txHash)}`}
-                    className="underline text-primary font-data-mono text-[11px]"
-                  >
-                    <Ltr>{entry.txHash.slice(0, 8)}…</Ltr>
-                  </Link>
+                  {(() => {
+                    const txHash = parseRouteTxHash(entry.txHash);
+                    return txHash ? (
+                      <Link
+                        href={routes.tx(txHash)}
+                        className="underline text-primary font-data-mono text-[11px]"
+                      >
+                        <Ltr>{entry.txHash.slice(0, 8)}…</Ltr>
+                      </Link>
+                    ) : null;
+                  })()}
                   {explorer && (
                     <a
                       href={explorer}

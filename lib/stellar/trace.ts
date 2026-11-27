@@ -52,6 +52,23 @@ export async function fetchAndVerifyTraceWith(cid: string, onChainHash: string, 
   return check;
 }
 
+const inflight = new Map<string, Promise<TraceCheck>>();
+let traceCache: ReturnType<typeof openTraceCache> | null = null;
+
+function getTraceCache() {
+  if (!traceCache) {
+    traceCache = openTraceCache({
+      budgetBytes: 25 * 1024 * 1024,
+      maxEntryBytes: 8 * 1024 * 1024,
+      enabled: () => {
+        if (typeof window === "undefined") return false;
+        return window.localStorage.getItem("oracledesk:trace-cache:enabled") !== "false";
+      },
+    });
+  }
+  return traceCache;
+}
+
 /**
  * Fetches trace content and checks it against the on-chain hash. Content is
  * only returned when it is verified; callers must never render anything
@@ -185,4 +202,13 @@ export function verifyTraceInWorker(cid: string, onChainHash: string, opts: Work
       carLimits,
     } satisfies TraceWorkerRequest);
   });
+}
+
+function normalizedHash(hash: string) {
+  return normalizeHash(hash);
+}
+
+function looksLikeJson(bytes: Uint8Array) {
+  const text = new TextDecoder().decode(bytes).trim();
+  return text.startsWith("{") || text.startsWith("[");
 }

@@ -1,4 +1,4 @@
-<!-- Copy of OracleDesk-Backend/docs/api.md. The backend copy is canonical; update it there first. -->
+<!-- Copy of OracleDesk-Backend/docs/api.md (pinned in docs/backend-ref.json). The backend copy is canonical; update it there first, then run `node scripts/gen-api-docs.mjs --backend /path/to/OracleDesk-Backend --write`. -->
 
 # OracleDesk backend API (Stellar)
 
@@ -6,7 +6,7 @@ This is the contract between `OracleDesk-Frontend` and this backend. The
 Soroban contracts in `OracleDesk-SmartContract/oracledesk-stellar` are the
 source of truth for anything on-chain; this API never overrides them.
 
-Base URL: `/api/v1` (health is at `/health`).
+Base URL: `/api/v1` (probes: `/livez`, `/readyz`; `/health` is deprecated and emits a `Link` header pointing at `/readyz`).
 
 ## Conventions
 
@@ -94,7 +94,17 @@ removes the enum value. `settlementCurrency` stays in responses (always
 
 ### Health
 
-`GET /health` → `{ status: "healthy", uptime: number }`
+- `GET /livez` — liveness probe
+- `GET /readyz` — readiness probe
+- `GET /health` → `{ status: "healthy", uptime: number }` (deprecated; emits `Link: </readyz>; rel="successor-version"`)
+
+### Verified backend route & error notes
+
+- **Auth & SEP-45**: `GET /auth/challenge/pow` (PoW challenge), `POST /auth/refresh`, and SEP-45 contract auth routes (`/auth/contract/*`).
+- **Idempotency**: `POST /trade/copy` requires an `Idempotency-Key` header and returns `400 IDEMPOTENCY_KEY_REQUIRED` when missing.
+- **Step-up auth**: Privileged admin actions can return `403 STEP_UP_REQUIRED`.
+- **Traces & payments**: `/traces/payment-intents*` and `/traces/access/preauthorize`.
+- **Agents, reports & admin**: `/agents/calibration`, `/reports*`, and `/admin/*` routes.
 
 ### Auth (signed challenge, SEP-10 style)
 
@@ -571,27 +581,63 @@ Emitted when the indexer stores a reasoning-registry publish event.
 
 ## Frontend call map
 
-Every call in the frontend's `lib/api/*.ts` and where it lands:
+<!-- BEGIN GENERATED:API_CALL_MAP -->
 
-| Frontend function | Endpoint |
-|---|---|
-| `requestChallenge` / `verifyChallenge` (`auth.ts`) | `POST /auth/challenge`, `POST /auth/verify` |
-| ~~`connectWalletToBackend`~~ | ~~`POST /auth/connect`~~ (removed) |
-| `listMarkets` | `GET /markets` |
-| `getMarket` | `GET /markets/:id` |
-| `getMarketByOnChainId` | `GET /markets/on-chain/:onChainMarketId` |
-| `triggerMarketGeneration` | `POST /markets/generate` |
-| `getMarketGenerationStatus` | `GET /markets/generation-status/:jobId` |
-| `getPortfolio` | `GET /portfolio` |
-| `getPositions` | `GET /portfolio/positions` |
-| `getPlatformStats` | `GET /portfolio/stats` |
-| `initiateCopyTrade` | `POST /trade/copy` |
-| `confirmCopyTrade` | `PATCH /trade/copy/:id/confirm` |
-| `listTraces` | `GET /traces` |
-| `getTrace` | `GET /traces/:id` |
-| `verifyTrace` | `POST /traces/verify` |
-| `unlockTrace` | `POST /traces/:id/unlock` (daily pass) |
-| `getSpendingAllowance` / `setSpendingAllowance` | `GET` / `PUT /traces/access/allowance` |
-| `getPaymentEvents` | `GET /traces/payments` |
-| `getResolution` | `GET /oracle/markets/:marketId/resolution` |
-| per-trace unlock | x402 `GET {X402_URL}/traces/:onChainTraceId` |
+Every call in the frontend (`lib/api/*.ts` and `app/`/`components/`), extracted by `scripts/gen-api-docs.mjs`:
+
+| Frontend function | File | Endpoint |
+|---|---|---|
+| `useAdminPermissions` | `lib/admin/useAdminPermissions.ts:41` | `GET /admin/roles` |
+| `useAdminPermissions` | `lib/admin/useAdminPermissions.ts:53` | `GET /admin/admins` |
+| `checkSpecCompat` | `lib/api/admin.ts:53` | `GET /admin/spec-compat` |
+| `listReconcileRuns` | `lib/api/admin.ts:183` | `GET /admin/reconcile/runs` |
+| `getReconcileRun` | `lib/api/admin.ts:199` | `GET /admin/reconcile/runs/:param` |
+| `triggerReconcile` | `lib/api/admin.ts:215` | `POST /admin/reconcile` |
+| `getAgentControls` | `lib/api/agent-controls.ts:12` | `GET /admin/agents/controls` |
+| `pauseAgent` | `lib/api/agent-controls.ts:17` | `POST /admin/agents/:param/pause` |
+| `resumeAgent` | `lib/api/agent-controls.ts:26` | `POST /admin/agents/:param/resume` |
+| `requestChallenge` | `lib/api/auth.ts:100` | `POST /auth/challenge` |
+| `solvePowIfRequired` | `lib/api/auth.ts:125` | `GET /auth/challenge/pow` |
+| `verifyChallenge` | `lib/api/auth.ts:178` | `POST /auth/verify` |
+| `getServerSession` | `lib/api/auth.ts:206` | `GET /auth/session` |
+| `logoutBackend` | `lib/api/auth.ts:228` | `POST /auth/logout` |
+| `refreshSession` | `lib/api/auth.ts:361` | `POST /auth/refresh` |
+| `listDisputes` | `lib/api/disputes.ts:9` | `GET /admin/disputes` |
+| `ackDispute` | `lib/api/disputes.ts:13` | `POST /admin/disputes/:param/ack` |
+| `resolveOrVoidDispute` | `lib/api/disputes.ts:20` | `POST /admin/disputes/:param/:param` |
+| `listMarkets` | `lib/api/markets.ts:85` | `GET /markets` |
+| `getMarket` | `lib/api/markets.ts:90` | `GET /markets/:param` |
+| `getMarketByOnChainId` | `lib/api/markets.ts:95` | `GET /markets/on-chain/:param` |
+| `getResolution` | `lib/api/markets.ts:112` | `GET /oracle/markets/:param/resolution` |
+| `triggerMarketGeneration` | `lib/api/markets.ts:139` | `POST /markets/generate` |
+| `getMarketGenerationStatus` | `lib/api/markets.ts:172` | `GET /markets/generation-status/:param` |
+| `getVapidKey` | `lib/api/notifications.ts:57` | `GET /notifications/vapid-key` |
+| `putSubscription` | `lib/api/notifications.ts:65` | `PUT /notifications/subscriptions` |
+| `deleteSubscription` | `lib/api/notifications.ts:71` | `DELETE /notifications/subscriptions/:param` |
+| `listSubscriptions` | `lib/api/notifications.ts:75` | `GET /notifications/subscriptions` |
+| `getPortfolio` | `lib/api/portfolio.ts:61` | `GET /portfolio` |
+| `getPositions` | `lib/api/portfolio.ts:66` | `GET /portfolio/positions` |
+| `getPlatformStats` | `lib/api/portfolio.ts:71` | `GET /portfolio/stats` |
+| `listTraces` | `lib/api/traces.ts:183` | `GET /traces` |
+| `getTrace` | `lib/api/traces.ts:188` | `GET /traces/:param` |
+| `verifyTrace` | `lib/api/traces.ts:193` | `POST /traces/verify` |
+| `unlockTrace` | `lib/api/traces.ts:209` | `POST /traces/:param/unlock` |
+| `getSpendingAllowance` | `lib/api/traces.ts:227` | `GET /traces/access/allowance` |
+| `setSpendingAllowance` | `lib/api/traces.ts:236` | `PUT /traces/access/allowance` |
+| `getPaymentEvents` | `lib/api/traces.ts:244` | `GET /traces/payments` |
+| `initiateCopyTrade` | `lib/api/trade.ts:35` | `POST /trade/copy` |
+| `confirmCopyTrade` | `lib/api/trade.ts:49` | `PATCH /trade/copy/:param/confirm` |
+| `proposeTreasuryOperation` | `lib/api/treasury-admin.ts:75` | `POST /admin/treasury/operations` |
+| `listTreasuryOperations` | `lib/api/treasury-admin.ts:83` | `GET /admin/treasury/operations` |
+| `getTreasuryOperation` | `lib/api/treasury-admin.ts:90` | `GET /admin/treasury/operations/:param` |
+| `approveTreasuryOperation` | `lib/api/treasury-admin.ts:100` | `POST /admin/treasury/operations/:param/approve` |
+| `executeTreasuryOperation` | `lib/api/treasury-admin.ts:110` | `POST /admin/treasury/operations/:param/execute` |
+| `cancelTreasuryOperation` | `lib/api/treasury-admin.ts:119` | `POST /admin/treasury/operations/:param/cancel` |
+| `AdminRolesPage` | `app/admin/roles/page.tsx:56` | `GET /admin/roles` |
+| `AdminRolesPage` | `app/admin/roles/page.tsx:66` | `GET /admin/admins` |
+| `grantMutation` | `app/admin/roles/page.tsx:78` | `POST /admin/admins/grant` |
+| `revokeMutation` | `app/admin/roles/page.tsx:87` | `POST /admin/admins/revoke` |
+
+> **Backend route coverage:** pending generation against the pinned checkout (`OracleDesk/OracleDesk-Backend` @ `PENDING_PINNED_COMMIT_SHA`). Run `node scripts/gen-api-docs.mjs --backend /path/to/OracleDesk-Backend --write` to populate the mounted-route coverage table.
+
+<!-- END GENERATED:API_CALL_MAP -->

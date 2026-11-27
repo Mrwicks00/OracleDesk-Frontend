@@ -41,6 +41,10 @@ const ARG_LABELS: Record<string, string> = {
   from: "From",
   to: "To",
   amount: "Amount (USDC)",
+  agent: "Agent address",
+  effective_from: "Effective time",
+  reason: "Reason",
+  trace_id: "Trace id",
 };
 
 function stringValue(value: string | Buffer): string {
@@ -120,21 +124,152 @@ export function contractDisplay(contractId: string): string {
   if (contractId === CONTRACTS.marketCore) return "Market core";
   if (contractId === CONTRACTS.treasury) return "Treasury";
   if (contractId === CONTRACTS.usdc) return "USDC token (Stellar Asset Contract)";
+  if (contractId === CONTRACTS.reasoningRegistry) return "Reasoning registry";
+  if (contractId === "none" || !contractId) return "Footprint operation";
   return "Contract";
+}
+
+function decodeFootprintKey(key: xdr.LedgerKey): string | null {
+  try {
+    if (key.switch().name === "contractData") {
+      const data = key.contractData();
+      const scVal = data.key();
+      if (scVal.switch().name === "scvVec") {
+        const vec = scVal.vec();
+        if (vec && vec.length > 0 && vec[0].switch().name === "scvSymbol") {
+          const sym = vec[0].sym().toString();
+          if ((sym === "Market" || sym === "Position") && vec.length > 1) {
+            const mIdVal = vec[1];
+            if (mIdVal.switch().name === "scvU64") {
+              const u64 = mIdVal.u64();
+              const id = (BigInt(u64.high) << 32n) | BigInt(u64.low);
+              return `${sym} (Market #${id})`;
+            }
+          }
+          return sym;
+        }
+      }
+    }
+  } catch {
+    // non-fatal
+  }
+  return null;
 }
 
 export function describeAssembled(
   tx: AssembledTransaction<unknown>,
-  spec: Spec | "sac",
+  spec: Spec | "sac" | "none",
   derived: DerivedFields = {},
 ): ReviewModel {
   const built = tx.built;
   if (!built) throw new Error("The transaction must be simulated before it can be reviewed.");
   const operations = built.operations;
-  if (operations.length !== 1 || operations[0].type !== "invokeHostFunction") {
-    throw new Error("Only a single contract invocation can be reviewed.");
+  if (operations.length !== 1) {
+    throw new Error("Only a single operation can be reviewed.");
   }
-  const hostFunction = operations[0].func;
+  const op = operations[0];
+
+  if (op.type === "extendFootprintTtl") {
+    const extendTo = (op as { extendTo?: number }).extendTo ?? 0;
+    const bounds = built.timeBounds;
+    const sorobanData = (built as { sorobanData?: xdr.SorobanTransactionData }).sorobanData;
+    const readOnlyKeys: xdr.LedgerKey[] = sorobanData ? sorobanData.resources().footprint().readOnly() : [];
+    const entryDescriptions = readOnlyKeys.map((k: xdr.LedgerKey, i: number) => decodeFootprintKey(k) ?? `Entry #${i + 1}`).join(", ");
+    const args: ReviewField[] = [
+      {
+        label: "Operation",
+        type: "string",
+        display: "Extend TTL",
+        raw: "extendFootprintTtl",
+      },
+      {
+        label: "Extend to ledger",
+        type: "u32",
+        display: `#${extendTo}`,
+        raw: String(extendTo),
+      },
+    ];
+    if (readOnlyKeys.length > 0) {
+      args.push({
+        label: "Entries",
+        type: "string",
+        display: `${readOnlyKeys.length} ${readOnlyKeys.length === 1 ? "entry" : "entries"}${entryDescriptions ? ` (${entryDescriptions})` : ""}`,
+        raw: String(readOnlyKeys.length),
+      });
+    }
+    const minResourceFee = (tx.simulation as { minResourceFee?: string | number } | undefined)?.minResourceFee;
+    if (minResourceFee) {
+      args.push({
+        label: "Resource fee",
+        type: "string",
+        display: `${formatUsdc(BigInt(minResourceFee), { minDecimals: 7, maxDecimals: 7 })} XLM`,
+        raw: String(minResourceFee),
+      });
+    }
+    return {
+      network: NETWORK_LABEL,
+      source: built.source,
+      sequence: built.sequence,
+      fee: `${formatUsdc(BigInt(built.fee), { minDecimals: 7, maxDecimals: 7 })} XLM`,
+      validFrom: bounds?.minTime ?? null,
+      validUntil: bounds?.maxTime ?? null,
+      contractId: "none",
+      contractName: "Footprint operation",
+      fn: "extendFootprintTtl",
+      args,
+      hash: built.hash().toString("hex"),
+    };
+  }
+
+  if (op.type === "restoreFootprint") {
+    const bounds = built.timeBounds;
+    const sorobanData = (built as { sorobanData?: xdr.SorobanTransactionData }).sorobanData;
+    const readWriteKeys: xdr.LedgerKey[] = sorobanData ? sorobanData.resources().footprint().readWrite() : [];
+    const entryDescriptions = readWriteKeys.map((k: xdr.LedgerKey, i: number) => decodeFootprintKey(k) ?? `Entry #${i + 1}`).join(", ");
+    const args: ReviewField[] = [
+      {
+        label: "Operation",
+        type: "string",
+        display: "Restore footprint",
+        raw: "restoreFootprint",
+      },
+    ];
+    if (readWriteKeys.length > 0) {
+      args.push({
+        label: "Entries to restore",
+        type: "string",
+        display: `${readWriteKeys.length} ${readWriteKeys.length === 1 ? "entry" : "entries"}${entryDescriptions ? ` (${entryDescriptions})` : ""}`,
+        raw: String(readWriteKeys.length),
+      });
+    }
+    const minResourceFee = (tx.simulation as { minResourceFee?: string | number } | undefined)?.minResourceFee;
+    if (minResourceFee) {
+      args.push({
+        label: "Resource fee",
+        type: "string",
+        display: `${formatUsdc(BigInt(minResourceFee), { minDecimals: 7, maxDecimals: 7 })} XLM`,
+        raw: String(minResourceFee),
+      });
+    }
+    return {
+      network: NETWORK_LABEL,
+      source: built.source,
+      sequence: built.sequence,
+      fee: `${formatUsdc(BigInt(built.fee), { minDecimals: 7, maxDecimals: 7 })} XLM`,
+      validFrom: bounds?.minTime ?? null,
+      validUntil: bounds?.maxTime ?? null,
+      contractId: "none",
+      contractName: "Footprint operation",
+      fn: "restoreFootprint",
+      args,
+      hash: built.hash().toString("hex"),
+    };
+  }
+
+  if (op.type !== "invokeHostFunction") {
+    throw new Error("Only a contract invocation or footprint operation can be reviewed.");
+  }
+  const hostFunction = op.func;
   if (hostFunction.switch().name !== "hostFunctionTypeInvokeContract") {
     throw new Error("The assembled operation is not a contract invocation.");
   }
@@ -162,10 +297,10 @@ export function describeAssembled(
         ...(derived[name] ? { derivedFrom: derived[name].from } : {}),
       };
     });
-  } else {
+  } else if (spec !== "none") {
     const inputs = spec.getFunc(fn).inputs();
     if (inputs.length !== args.length) throw new Error("Decoded argument count does not match the contract spec.");
-    fields = inputs.map((input, index) => {
+    fields = inputs.map((input: xdr.ScSpecFunctionInputV0, index: number) => {
       const name = stringValue(input.name());
       const typeDef = input.type();
       const type = typeName(spec, typeDef);
@@ -178,6 +313,8 @@ export function describeAssembled(
         ...(derived[name] ? { derivedFrom: derived[name].from } : {}),
       };
     });
+  } else {
+    fields = [];
   }
 
   const bounds = built.timeBounds;

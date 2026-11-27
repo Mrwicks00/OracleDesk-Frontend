@@ -8,6 +8,8 @@
  * TS); lib/notifications/__tests__/payload.test.ts checks they stay in sync.
  */
 
+import { parseOnChainMarketId, routes } from "../routes";
+
 export const MARKET_ID_RE = /^\d{1,20}$/;
 export const TX_HASH_RE = /^[0-9a-f]{64}$/;
 export const TRACE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -63,8 +65,11 @@ export function parsePushPayload(raw: unknown): PushPayload | null {
 
 /** Same-origin path built only from validated ids. */
 export function notificationUrl(p: PushPayload | null): string {
-  if (!p?.onChainMarketId || !MARKET_ID_RE.test(p.onChainMarketId)) return "/notifications";
-  return `/markets/quick-view?onChainId=${p.onChainMarketId}&from=push`;
+  const onChainId = p?.onChainMarketId && MARKET_ID_RE.test(p.onChainMarketId)
+    ? parseOnChainMarketId(p.onChainMarketId)
+    : null;
+  if (!onChainId) return routes.notifications();
+  return routes.marketsQuickView({ onChainId, from: "push" });
 }
 
 export interface FetchedFacts {

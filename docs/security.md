@@ -60,3 +60,24 @@ Rollout: ship report-only, collect reports for a release, fix violations, then
 set `NEXT_PUBLIC_CSP_ENFORCE=1`. The header check (`npm run check:headers`)
 asserts every header on `/`, `/markets`, `/markets/quick-view`,
 `/reasoning/verify`, `/premium` and `/copy-trade`.
+
+## Collateral asset issuer verification (SEP-1)
+
+`lib/stellar/issuer-verification.ts` verifies the collateral asset's issuer
+through SEP-1 (`home_domain` on the issuer account →
+`https://<domain>/.well-known/stellar.toml` → matching `[[CURRENCIES]]` entry
+with both `code` and `issuer`, plus `[DOCUMENTATION] ORG_NAME`).
+
+- **Trust limit**: This proves only that the issuer account and the domain's
+  `stellar.toml` agree; it does **not** prove the organization is trustworthy or
+  that an asset is official Circle USDC. For mainnet, always pin the expected
+  issuer in `NEXT_PUBLIC_USDC_ASSET` as the primary control, treating SEP-1
+  verification as a second line of defense.
+- **Browser CORS limitation**: SEP-1 requires `Access-Control-Allow-Origin: *`
+  on `stellar.toml`. Many issuers do not configure CORS headers, causing browser
+  fetches to fail. Network and CORS failures are reported as `"unverifiable"`
+  (distinct from `"unverified"`), without any proxy or backend workaround.
+- **Mainnet vs. testnet**: Mainnet fails closed (trustline creation and trading
+  are blocked without an override when `status !== "verified"`). Testnet warns
+  but allows, since the default test asset is self-issued and may lack a
+  `home_domain`.

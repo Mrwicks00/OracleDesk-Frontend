@@ -66,9 +66,17 @@ export interface MessageParamTypes {
   "errors.contract.marketCore.SlippageExceeded": undefined;
   "errors.contract.reasoningRegistry.AgentAlreadyRegistered": undefined;
   "errors.contract.reasoningRegistry.AgentNotRegistered": undefined;
+  "errors.contract.reasoningRegistry.CannotReactivateRevoked": undefined;
+  "errors.contract.reasoningRegistry.ChainHeadMismatch": undefined;
+  "errors.contract.reasoningRegistry.ChainedAgentMustChain": undefined;
   "errors.contract.reasoningRegistry.EmptyAction": undefined;
   "errors.contract.reasoningRegistry.EmptyCid": undefined;
+  "errors.contract.reasoningRegistry.FlagHistoryFull": undefined;
+  "errors.contract.reasoningRegistry.InvalidEffectiveTime": undefined;
+  "errors.contract.reasoningRegistry.NoPendingAdmin": undefined;
   "errors.contract.reasoningRegistry.NotInitialized": undefined;
+  "errors.contract.reasoningRegistry.PendingAdminExpired": undefined;
+  "errors.contract.reasoningRegistry.TraceAlreadyConsumed": undefined;
   "errors.contract.reasoningRegistry.TraceNotFound": undefined;
   "errors.contract.reasoningRegistry.Unauthorized": undefined;
   "errors.contract.resolver.AlreadyAttested": undefined;
@@ -123,6 +131,7 @@ export interface MessageParamTypes {
   "nav.admin": undefined;
   "nav.analytics": undefined;
   "nav.fpmmExplainer": undefined;
+  "nav.glossary": undefined;
   "nav.liveTerminal": undefined;
   "nav.markets": undefined;
   "nav.notifications": undefined;

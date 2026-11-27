@@ -78,3 +78,34 @@ export function classifyDeadline(
     },
   };
 }
+
+/**
+ * Classifies a position or market entry whose TTL has crossed an expiration threshold.
+ * Emits id = `storage-expiring:${thresholdDays}:${marketId}` so each threshold is emitted at most once per market.
+ */
+export function classifyStorageExpiring(
+  marketId: string,
+  entryKind: "market" | "position",
+  ttlDays: number,
+  thresholdDays: number,
+  owner: string,
+  latestLedger: number,
+  createdAt = Date.now(),
+): InboxItem {
+  return {
+    owner,
+    network: NETWORK_PASSPHRASE,
+    kind: "storage-expiring",
+    id: `storage-expiring:${thresholdDays}:${marketId}`,
+    marketId,
+    ledger: latestLedger,
+    createdAt,
+    readAt: null,
+    data: {
+      marketId,
+      entryKind,
+      ttlDays: String(ttlDays),
+      thresholdDays: String(thresholdDays),
+    },
+  };
+}

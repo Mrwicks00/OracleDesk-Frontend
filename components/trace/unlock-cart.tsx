@@ -4,6 +4,8 @@ import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Icon } from "@/components/ui/icon";
 import { useWallet } from "@/lib/contexts/WalletContext";
+import { useWalletMeta } from "@/lib/stellar/WalletProvider";
+import { effectiveCaps } from "@/lib/stellar/wallet-capabilities";
 import { X402_ENABLED, useUnlockCart, useX402UnlockDeps } from "@/lib/hooks/useX402";
 import { unlockTrace } from "@/lib/x402/client";
 import {
@@ -58,7 +60,10 @@ function downloadReceipt(receipt: CheckoutReceipt) {
  */
 export function UnlockCart({ cart, dailyPassPriceRaw }: { cart: ReturnType<typeof useUnlockCart>; dailyPassPriceRaw: bigint | null }) {
   const { address, openModal } = useWallet();
+  const { selectedWalletId } = useWalletMeta();
   const deps = useX402UnlockDeps();
+  // Known-unsupported wallets get an explanation before any quote or checkout starts.
+  const walletCannotUnlock = Boolean(address) && effectiveCaps(selectedWalletId).signAuthEntry === "no";
   const [open, setOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [receipt, setReceipt] = useState<CheckoutReceipt | null>(null);
@@ -69,8 +74,8 @@ export function UnlockCart({ cart, dailyPassPriceRaw }: { cart: ReturnType<typeo
 
   // Quote new items while the drawer is open (from each trace's live 402).
   useEffect(() => {
-    if (open && !running && pendingQuotes > 0) void quote();
-  }, [open, running, pendingQuotes, quote]);
+    if (open && !running && !walletCannotUnlock && pendingQuotes > 0) void quote();
+  }, [open, running, pendingQuotes, quote, walletCannotUnlock]);
 
   // A disconnect or account switch ends the run; the partial receipt stays.
   useEffect(() => {
@@ -225,11 +230,17 @@ export function UnlockCart({ cart, dailyPassPriceRaw }: { cart: ReturnType<typeo
                     </Link>
                   </p>
                 )}
+                {walletCannotUnlock && (
+                  <div className="text-sm space-y-2" role="status">
+                    <p>Your wallet can&apos;t sign the authorization x402 payments need, so checkout is unavailable with it.</p>
+                    <button type="button" onClick={openModal} className="underline">Switch wallet</button>
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={start}
-                    disabled={running || ready.length === 0}
+                    disabled={running || ready.length === 0 || walletCannotUnlock}
                     className="flex-1 px-4 py-3 bg-primary text-primary-foreground rounded font-label-caps text-label-caps disabled:opacity-50"
                   >
                     {running ? "Checking out…" : address ? "Start checkout" : "Connect wallet"}

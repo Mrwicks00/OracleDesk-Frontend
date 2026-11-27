@@ -8,6 +8,7 @@ import { formatUsdc } from "@/lib/stellar/units";
 import { useTxTracker, type TrackedTx } from "@/lib/stellar/tx-tracker";
 import { unlockDailyPass } from "@/lib/api/traces";
 import { reportError } from "@/lib/observability/report";
+import { parseRouteTxHash, routes } from "@/lib/routes";
 
 export function TxToastContainer() {
   const { list, dismiss } = useTxTracker();
@@ -168,12 +169,17 @@ export function TxToastContainer() {
               )}
 
               <div className="flex items-center gap-3 pt-1 text-[10px] font-label-caps">
-                <Link
-                  href={`/tx?hash=${tx.hash}`}
-                  className="text-primary hover:underline font-bold"
-                >
-                  Details
-                </Link>
+                {(() => {
+                  const parsedHash = parseRouteTxHash(tx.hash);
+                  return parsedHash ? (
+                    <Link
+                      href={routes.tx(parsedHash)}
+                      className="text-primary hover:underline font-bold"
+                    >
+                      Details
+                    </Link>
+                  ) : null;
+                })()}
                 <a
                   href={explorerTx(tx.hash) ?? undefined}
                   target="_blank"

@@ -7,6 +7,7 @@ import { BUILD_IDENTITY, IDENTITIES, explorerAccount, type IdentityEntry, type I
 import { addressFingerprint, groupAddress, type AddressFingerprint } from "@/lib/stellar/fingerprint";
 import { formatUsdcDisplay, formatSignedUsdc } from "@/lib/format/money";
 import type { Effect } from "@/lib/stellar/state-changes";
+import { Term } from "@/components/ui/term";
 
 const SKIP_REVIEW_KEY = "oracledesk_skip_tx_review";
 
@@ -215,16 +216,18 @@ export function TxReview({ model, changedFrom, confirming = false, effects, effe
             <h3 id="tx-review-network" className="mb-3 font-label-caps text-label-caps text-on-surface">Network details</h3>
             <dl className="space-y-2">
               <Row label="Network" value={model.network} />
-              <Row label="Source account" value={model.source} changed={changed(changedFrom?.source, model.source)} />
-              <Row label="Sequence" value={model.sequence} changed={changed(changedFrom?.sequence, model.sequence)} />
-              <Row label="Fee" value={model.fee} changed={changed(changedFrom?.fee, model.fee)} />
-              <Row label="Valid from" value={formatBound(model.validFrom)} changed={changed(changedFrom?.validFrom, model.validFrom)} />
-              <Row label="Valid until" value={formatBound(model.validUntil)} changed={changed(changedFrom?.validUntil, model.validUntil)} />
+              <Row label={<Term id="source-account">Source account</Term>} value={model.source} changed={changed(changedFrom?.source, model.source)} />
+              <Row label={<Term id="sequence-number">Sequence</Term>} value={model.sequence} changed={changed(changedFrom?.sequence, model.sequence)} />
+              <Row label={<Term id="xlm">Fee</Term>} value={model.fee} changed={changed(changedFrom?.fee, model.fee)} />
+              <Row label={<Term id="time-bounds">Valid from</Term>} value={formatBound(model.validFrom)} changed={changed(changedFrom?.validFrom, model.validFrom)} />
+              <Row label={<Term id="time-bounds">Valid until</Term>} value={formatBound(model.validUntil)} changed={changed(changedFrom?.validUntil, model.validUntil)} />
             </dl>
           </section>
 
           <section aria-labelledby="tx-review-hash">
-            <h3 id="tx-review-hash" className="mb-2 font-label-caps text-label-caps text-on-surface">Transaction hash</h3>
+            <h3 id="tx-review-hash" className="mb-2 font-label-caps text-label-caps text-on-surface">
+              <Term id="trace-hash">Transaction hash</Term>
+            </h3>
             <p className={`break-all font-data-mono text-xs ${changedClass(changed(changedFrom?.hash, model.hash))}`}>{model.hash}</p>
             <p className="mt-1 text-xs text-on-surface-variant">Before your wallet signs; your wallet may change the final hash.</p>
           </section>
@@ -263,7 +266,7 @@ export function TxReview({ model, changedFrom, confirming = false, effects, effe
   );
 }
 
-function Row({ label, value, changed: isChanged = false }: { label: string; value: string; changed?: boolean }) {
+function Row({ label, value, changed: isChanged = false }: { label: React.ReactNode; value: string; changed?: boolean }) {
   return (
     <div className="grid grid-cols-[9rem_1fr] gap-3">
       <dt className="text-sm text-on-surface-variant">{label}</dt>

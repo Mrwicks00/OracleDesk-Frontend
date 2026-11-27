@@ -9,6 +9,21 @@ import { useImportMultisig, useSubmitMultisig } from "@/lib/hooks/useStellar";
 import { useWallet } from "@/lib/contexts/WalletContext";
 import { formatUsdc, formatXlm } from "@/lib/stellar/units";
 import { AddressText } from "@/components/ui/address-text";
+import { Term } from "@/components/ui/term";
+import { useFormErrors, ErrorSummary, FieldError } from "@/components/ui/form-errors";
+import { describeError } from "@/lib/stellar/errors";
+import type { TermId } from "@/lib/glossary/terms";
+
+const ARG_DISPLAY: Record<string, { label: string; termId?: TermId }> = {
+  min_shares_out: { label: "Minimum shares out", termId: "limit-price" },
+  max_shares_in: { label: "Maximum shares in", termId: "limit-price" },
+  collateral_in: { label: "Collateral in", termId: "usdc" },
+  collateral_out: { label: "Collateral out", termId: "usdc" },
+  market_id: { label: "Market ID" },
+  outcome: { label: "Outcome", termId: "share" },
+  trader: { label: "Trader", termId: "source-account" },
+  holder: { label: "Holder", termId: "source-account" },
+};
 
 function contractName(contractId: string): string {
   if (contractId === CONTRACTS.marketCore) return "Market core";
@@ -54,6 +69,7 @@ export function MultisigReview({
   const [signState, setSignState] = useState<string | null>(null);
   const nowMs = useNowMs();
   const localXdr = session.xdr;
+  const form = useFormErrors(["importXdr"] as const);
 
   const parsed = useMemo(() => {
     try {
@@ -88,7 +104,15 @@ export function MultisigReview({
 
   const handleImport = async () => {
     setCopyState(null);
-    if (!importText.trim()) return;
+    form.clearErrors();
+    const valid = form.attemptSubmit(() => {
+      const errs: Partial<Record<"importXdr", string>> = {};
+      if (!importText.trim()) {
+        errs.importXdr = "Paste a signed XDR to import.";
+      }
+      return errs;
+    });
+    if (!valid) return;
     try {
       const res = await importMut.mutateAsync({ session, importedXdr: importText.trim() });
       onUpdated?.(res.session);
@@ -99,7 +123,9 @@ export function MultisigReview({
           : `Imported. Weight ${res.weight}/${session.requiredThreshold}.`,
       );
     } catch (err) {
-      setCopyState(err instanceof Error ? err.message : "Import failed.");
+      const msg = err instanceof Error ? err.message : "Import failed.";
+      form.setErrors({ importXdr: msg });
+      setCopyState(msg);
     }
   };
 
@@ -131,8 +157,14 @@ export function MultisigReview({
     try {
       await submitMut.mutateAsync({ session: { ...session, xdr: localXdr } });
       onClose?.();
-    } catch {
-      // Error surfaces via submitMut.error.
+    } catch (err) {
+      const desc = describeError(err);
+      form.setFormError(desc.message);
+      if (typeof window !== "undefined") {
+        window.requestAnimationFrame(() => {
+          form.summaryRef.current?.focus();
+        });
+      }
     }
   };
 
@@ -154,6 +186,13 @@ export function MultisigReview({
         </header>
 
         <div className="space-y-6 overflow-y-auto px-6 py-5">
+          <ErrorSummary
+            errors={form.errors}
+            formError={form.formError}
+            ids={form.ids}
+            labels={{ importXdr: "Import signed XDR" }}
+            summaryRef={form.summaryRef}
+          />
           <section>
             <h3 className="mb-3 font-label-caps text-label-caps text-on-surface">What you&apos;re doing</h3>
             <dl className="space-y-2">
@@ -169,16 +208,20 @@ export function MultisigReview({
                 <dt className="text-sm text-on-surface-variant">Function</dt>
                 <dd className="font-data-mono text-sm">{session.fn}</dd>
               </div>
-              {Object.entries(session.args ?? {}).map(([k, v]) => (
-                <div key={k} className="grid grid-cols-[9rem_1fr] gap-3">
-                  <dt className="text-sm text-on-surface-variant">{k}</dt>
-                  <dd className="break-all text-sm font-medium">{formatArg(k, v)} <span className="ms-2 font-data-mono text-xs text-on-surface-variant">{v}</span></dd>
-                </div>
-              ))}
+              {Object.entries(session.args ?? {}).map(([k, v]) => {
+                const meta = ARG_DISPLAY[k];
+                const labelNode = meta?.termId ? <Term id={meta.termId}>{meta.label}</Term> : (meta?.label ?? k);
+                return (
+                  <div key={k} className="grid grid-cols-[9rem_1fr] gap-3">
+                    <dt className="text-sm text-on-surface-variant">{labelNode}</dt>
+                    <dd className="break-all text-sm font-medium">{formatArg(k, v)} <span className="ms-2 font-data-mono text-xs text-on-surface-variant">{v}</span></dd>
+                  </div>
+                );
+              })}
             </dl>
             {(session.kind === "buy" || session.kind === "sell") && (
               <p className="mt-2 text-xs text-amber-800">
-                Quote is from ledger {session.quoteLedger ?? "N"} with {((session.args && "min_shares_out" in session.args) || session.kind === "buy") ? "3% slippage" : "3% slippage"}. The trade fails with SlippageExceeded (error 12) if the price moves further. The footprint/resource fee is from the build-time simulation; rebuild if submission fails with a resource or archived-entry error.
+                Quote is from ledger {session.quoteLedger ?? "N"} with <Term id="slippage">3% slippage</Term>. The trade fails with SlippageExceeded (error 12) if the price moves further. The footprint/resource fee is from the build-time simulation; rebuild if submission fails with a resource or archived-entry error.
               </p>
             )}
           </section>
@@ -296,19 +339,26 @@ export function MultisigReview({
             </div>
             {copyState && <p className="text-xs text-on-surface-variant">{copyState}</p>}
             {signState && <p className="text-xs text-on-surface-variant">{signState}</p>}
-            <label className="block text-xs font-bold" htmlFor="multisig-import">Import signed XDR</label>
+            <label className="block text-xs font-bold" htmlFor={form.ids.importXdr.input}>Import signed XDR</label>
             <textarea
-              id="multisig-import"
+              id={form.ids.importXdr.input}
               value={importText}
-              onChange={(e) => setImportText(e.target.value)}
+              onChange={(e) => {
+                setImportText(e.target.value);
+                if (form.errors.importXdr) form.clearErrors();
+              }}
+              onBlur={() => form.handleBlur("importXdr")}
               placeholder="Paste signed XDR from a co-signer…"
               rows={3}
+              aria-invalid={Boolean(form.errors.importXdr)}
+              aria-describedby={form.ids.importXdr.error}
               className="w-full rounded border border-outline-variant p-2 font-data-mono text-[10px]"
             />
+            <FieldError id={form.ids.importXdr.error} message={form.errors.importXdr} />
             <button
               type="button"
               onClick={handleImport}
-              disabled={importMut.isPending || !importText.trim()}
+              disabled={importMut.isPending}
               className="rounded bg-surface-container px-3 py-1.5 text-xs font-bold disabled:opacity-50"
             >
               {importMut.isPending ? "Importing…" : "Import signed XDR"}

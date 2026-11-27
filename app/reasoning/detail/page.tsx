@@ -8,6 +8,7 @@ import { getTrace, type ReasoningTrace } from "@/lib/api/traces";
 import { fetchAndVerifyTrace } from "@/lib/stellar/trace";
 import { SafeTraceViewer } from "@/components/safe-trace-viewer";
 import { SafeText } from "@/components/safe-text";
+import { asDemoId, parseReasoningDetailParams, routes } from "@/lib/routes";
 
 export default function ReasoningTraceDetailPage() {
   return (
@@ -19,7 +20,8 @@ export default function ReasoningTraceDetailPage() {
 
 function ReasoningTraceDetailContent() {
   const searchParams = useSearchParams();
-  const traceId = searchParams.get("traceId");
+  const parsedParams = parseReasoningDetailParams(searchParams);
+  const traceId = parsedParams.ok ? (parsedParams.traceId ?? parsedParams.onChainTraceId) : null;
 
   const [trace, setTrace] = useState<ReasoningTrace | null>(null);
   const [verifiedContent, setVerifiedContent] = useState<unknown>(null);
@@ -74,7 +76,7 @@ function ReasoningTraceDetailContent() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <Link
-            href="/reasoning"
+            href={routes.reasoning()}
             className="flex items-center gap-1.5 text-primary hover:underline text-xs font-label-caps mb-2"
           >
             <Icon name="arrow_back" className="text-sm" />
@@ -184,7 +186,7 @@ function ReasoningTraceDetailContent() {
               </div>
             </div>
             <Link 
-              href="/copy-trade?traceId=TRD-7724&marketId=MKT-9204"
+              href={routes.copyTrade({ traceId: asDemoId("TRD-7724"), marketId: asDemoId("MKT-9204") })}
               className="w-full bg-secondary text-primary-foreground font-headline-sm text-headline-sm py-4 rounded-xl flex items-center justify-center gap-3 hover:opacity-90 transition-opacity active:scale-[0.98] transform cursor-pointer"
             >
               <Icon name="bolt" filled />

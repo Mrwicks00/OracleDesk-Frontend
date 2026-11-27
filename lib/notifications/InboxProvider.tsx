@@ -11,8 +11,11 @@ import { decodeEvent, eventTopicFilter, fetchEventRange, type ChainEvent } from 
 import type { Position } from "@/lib/stellar/generated/market-core";
 import type { Stamped } from "@/lib/stellar/optimistic";
 import { useRealtimeBatch } from "@/lib/realtime/RealtimeProvider";
-import { classifyTrade, classifyTrace, classifyResolved, classifyRedeemed, classifyTracked, classifyDeadline } from "./classify";
+import { classifyTrade, classifyTrace, classifyResolved, classifyRedeemed, classifyTracked, classifyDeadline, classifyStorageExpiring } from "./classify";
 import { ledgerClock } from "@/lib/stellar/ledger-clock";
+import { estimateTtl } from "@/lib/stellar/ttl";
+import { loadSettingsFrom, settingsStorageKey } from "@/lib/settings/settings";
+import { positionLedgerKey, marketLedgerKey } from "@/lib/stellar/ledger-entries";
 import { openInbox, type Inbox, type InboxItem } from "./store";
 
 interface InboxView {
@@ -153,6 +156,49 @@ function ConnectedInbox({ owner, children }: { owner: string; children: ReactNod
               const unc = BigInt(Math.ceil(ledgerClock.uncertainty()));
               const dlItem = classifyDeadline(id, BigInt(market.close_time), BigInt(Math.floor(nowSec)), owner, position, unc);
               if (dlItem) synthetic.push(dlItem);
+            }
+
+            // TTL expiry warning check
+            const settings = loadSettingsFrom(settingsStorageKey(owner));
+            const thresholds = settings.ttlThresholdsDays ?? [30, 7];
+            const latestLedger = marketTx.simulation?.latestLedger ?? health.latestLedger;
+            const posEntry = await server.getLedgerEntries(positionLedgerKey(BigInt(id), owner)).catch(() => null);
+            const mktEntry = await server.getLedgerEntries(marketLedgerKey(BigInt(id))).catch(() => null);
+            const posLive = posEntry?.entries?.[0]?.liveUntilLedgerSeq ?? null;
+            const mktLive = mktEntry?.entries?.[0]?.liveUntilLedgerSeq ?? null;
+            const posEst = estimateTtl({
+              key: positionLedgerKey(BigInt(id), owner),
+              kind: "position",
+              marketId: BigInt(id),
+              liveUntil: posLive,
+              latestLedger,
+            });
+            const mktEst = estimateTtl({
+              key: marketLedgerKey(BigInt(id)),
+              kind: "market",
+              marketId: BigInt(id),
+              liveUntil: mktLive,
+              latestLedger,
+            });
+            const posDays = posEst.etaSeconds / 86400;
+            const mktDays = mktEst.etaSeconds / 86400;
+            const soonerKind = posDays <= mktDays ? "position" : "market";
+            const soonerDays = Math.min(posDays, mktDays);
+            if (soonerDays > 0) {
+              for (const thresh of thresholds) {
+                if (soonerDays <= thresh) {
+                  synthetic.push(
+                    classifyStorageExpiring(
+                      id,
+                      soonerKind,
+                      Math.max(1, Math.round(soonerDays)),
+                      thresh,
+                      owner,
+                      latestLedger,
+                    ),
+                  );
+                }
+              }
             }
           } else held.current.delete(id);
         }

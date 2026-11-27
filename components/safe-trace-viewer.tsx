@@ -5,6 +5,7 @@ import React, { useMemo, useState } from "react";
 import { validateTraceContent, type ValidatedTraceContent } from "@/lib/stellar/trace-schema";
 import { analyzeTextSafety } from "@/lib/text-safety";
 import { SafeText } from "@/components/safe-text";
+import { Term } from "@/components/ui/term";
 
 export interface SafeTraceViewerProps {
   content: unknown;
@@ -131,7 +132,15 @@ export function SafeTraceViewer({
               className="font-data-mono text-xs text-on-surface-variant bg-surface-container px-2 py-1 rounded"
               title={`IPFS CID: ${ipfsCid}`}
             >
-              CID: {ipfsCid.slice(0, 8)}…{ipfsCid.slice(-6)}
+              <Term id="trace-cid">CID</Term>: {ipfsCid.slice(0, 8)}…{ipfsCid.slice(-6)}
+            </span>
+          )}
+          {traceHash && (
+            <span
+              className="font-data-mono text-xs text-on-surface-variant bg-surface-container px-2 py-1 rounded"
+              title={`Trace Hash: ${traceHash}`}
+            >
+              <Term id="trace-hash">Hash</Term>: {traceHash.slice(0, 8)}…{traceHash.slice(-6)}
             </span>
           )}
           <button

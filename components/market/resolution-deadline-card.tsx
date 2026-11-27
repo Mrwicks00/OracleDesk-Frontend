@@ -23,6 +23,7 @@ import { settleValue } from "@/lib/stellar/generated/fpmm";
 import { formatUsdcDisplay } from "@/lib/format/money";
 import { supportsExpiryAndFallback, type ExpiryEffect } from "@/lib/stellar/resolution-deadline";
 import { userMessage } from "@/lib/errors/display";
+import { Term } from "@/components/ui/term";
 
 function formatCountdown(targetSec: bigint, nowSec: number | null, uncertaintySec: number): string {
   if (nowSec === null) return "syncing ledger time…";
@@ -169,11 +170,13 @@ export function ResolutionDeadlineCard({
       {activePreview?.ok && canWrite && !doneEffect && (
         <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
           <span className="text-xs text-on-surface-variant">
-            {activePreview.effect.kind === "void"
-              ? "Simulation proves this will void the market."
-              : activePreview.effect.kind === "resolve"
-                ? `Simulation proves this will resolve the market as ${activePreview.effect.outcome}.`
-                : "Simulation proves this will open signer fallback."}
+            {activePreview.effect.kind === "void" ? (
+              <span>Simulation proves this will <Term id="void">void</Term> the market.</span>
+            ) : activePreview.effect.kind === "resolve" ? (
+              `Simulation proves this will resolve the market as ${activePreview.effect.outcome}.`
+            ) : (
+              "Simulation proves this will open signer fallback."
+            )}
           </span>
           <button
             type="button"
@@ -216,11 +219,13 @@ export function ResolutionDeadlineCard({
             <div className="space-y-2 text-xs py-2">
               <p>
                 <strong>Simulated effect:</strong>{" "}
-                {activePreview.effect.kind === "void"
-                  ? "Void market (collateral returned proportionally)"
-                  : activePreview.effect.kind === "resolve"
-                    ? `Resolve market as ${activePreview.effect.outcome}`
-                    : "Open hybrid signer fallback"}
+                {activePreview.effect.kind === "void" ? (
+                  <span><Term id="void">Void</Term> market (collateral returned proportionally)</span>
+                ) : activePreview.effect.kind === "resolve" ? (
+                  `Resolve market as ${activePreview.effect.outcome}`
+                ) : (
+                  "Open hybrid signer fallback"
+                )}
               </p>
               {holderPayout !== null && (
                 <p>

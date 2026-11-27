@@ -18,7 +18,7 @@ const LifecycleTimeline = dynamic(
 );
 import { getMarketByOnChainId, getResolution } from "@/lib/api/markets";
 import { ApiError } from "@/lib/api/client";
-import { parseRecordId, parseU64 } from "@/lib/validation/ids";
+import { parseQuickViewParams, routes } from "@/lib/routes";
 import { useOnChainMarket, usePosition } from "@/lib/hooks/useStellar";
 import { useWalletAddress } from "@/lib/contexts/WalletContext";
 import { useViewedAddress } from "@/lib/hooks/useViewedAddress";
@@ -63,14 +63,13 @@ export default function MarketQuickViewPage() {
 function MarketQuickViewContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const fromParam = searchParams.get("from");
-  const rawMarketId = searchParams.get("marketId");
-  const marketId = parseRecordId(rawMarketId);
-  const rawOnChainId = searchParams.get("onChainId");
-  const onChainIdParam = parseU64(rawOnChainId);
-  const invalidLink = (Boolean(rawMarketId) && !marketId) || (Boolean(rawOnChainId) && !onChainIdParam);
-  const initialSide = searchParams.get("side") === "NO" ? "No" : "Yes";
-  const fromPush = searchParams.get("from") === "push";
+  const parsedParams = parseQuickViewParams(searchParams);
+  const fromParam = parsedParams.ok ? parsedParams.from : null;
+  const marketId = parsedParams.ok ? parsedParams.marketId : null;
+  const onChainIdParam = parsedParams.ok ? parsedParams.onChainId : null;
+  const invalidLink = !parsedParams.ok;
+  const initialSide = parsedParams.ok && parsedParams.side === "NO" ? "No" : "Yes";
+  const fromPush = fromParam === "push";
 
   const closeToMarkets = useCallback(() => {
     if (fromParam === "markets") {
@@ -88,7 +87,7 @@ function MarketQuickViewContent() {
         // Fall back to push
       }
     }
-    router.push("/markets");
+    router.push(routes.markets());
   }, [fromParam, router]);
 
   const backendById = useMarket(marketId ?? undefined);
@@ -192,6 +191,7 @@ function MarketQuickViewContent() {
     ? `$${fmt.usdc(view.market.sets_minted, { maxDecimals: 2, grouping: true })}`
     : market ? `${formatUsdcDisplay(BigInt(Math.round(market.totalLiquidity)))}` : "—";
   const w24 = priceWindow.data;
+  const activity = w24?.activity ?? null;
   const change = w24?.changeBps ?? null;
   const trend: "up" | "down" | "flat" = change === null || change === 0n ? "flat" : change > 0n ? "up" : "down";
   const changePts = change === null ? null : `${change > 0n ? "+" : ""}${fmt.points(change, { decimals: 2 })}`;
@@ -327,6 +327,40 @@ function MarketQuickViewContent() {
                 <div className="h-16 w-full flex items-center justify-center rounded bg-surface-container">
                   <p className="text-[11px] text-outline font-label-caps uppercase tracking-wider">Not enough history yet</p>
                 </div>
+              )}
+            </div>
+
+            {/* 24h On-Chain Activity */}
+            <div className="rounded-lg border border-outline-variant bg-surface-container-low p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-label-caps text-[10px] text-on-surface-variant uppercase tracking-wider">
+                  24h On-Chain Activity
+                </span>
+                {activity?.partial && (
+                  <span className="text-[10px] font-data-mono text-tertiary">
+                    partial window{activity.coveredHours !== null ? `: data covers the last ${activity.coveredHours} hours` : ""}
+                  </span>
+                )}
+              </div>
+              {priceWindow.isLoading ? (
+                <p className="text-xs text-on-surface-variant">Loading 24h activity…</p>
+              ) : activity?.status === "ready" ? (
+                <div className="grid grid-cols-3 gap-3 text-xs">
+                  <div>
+                    <p className="text-[10px] text-on-surface-variant uppercase">Volume (24h)</p>
+                    <p className="font-data-mono font-bold text-on-surface">{formatUsdcDisplay(activity.volume24h)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-on-surface-variant uppercase">Fees (24h)</p>
+                    <p className="font-data-mono font-bold text-on-surface">{formatUsdcDisplay(activity.fees24h)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-on-surface-variant uppercase">Traders · Trades</p>
+                    <p className="font-data-mono font-bold text-on-surface">{activity.uniqueTraders} · {activity.tradeCount}</p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-on-surface-variant">24h activity unavailable</p>
               )}
             </div>
 

@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { xdr, scValToNative, type rpc } from "@stellar/stellar-sdk";
 import { CONTRACTS } from "./config";
 import { decodeMarketCoreEvent, type DecodedEvent } from "./events";
+import { decodeRegistryEvent } from "./contract-events";
 import { rpcServer } from "./clients";
 import { ledgerClock, type LedgerInfo } from "./ledger-clock";
 import { marketPriceStore, type MarketPriceStore } from "@/lib/realtime/market-price-store";
@@ -12,6 +13,7 @@ export interface InvalidatorOptions {
   server?: Pick<rpc.Server, "getEvents">;
   marketCoreId?: string;
   usdcId?: string;
+  registryId?: string;
   priceStore?: MarketPriceStore;
   onDecodedEvents?: (events: DecodedEvent[], currentLedger: number, gapTriggered: boolean) => void;
 }
@@ -128,10 +130,12 @@ export class LedgerInvalidator {
       const server = this.opts.server ?? rpcServer();
       const marketCoreId = this.opts.marketCoreId ?? CONTRACTS.marketCore;
       const usdcId = this.opts.usdcId ?? CONTRACTS.usdc;
+      const registryId = this.opts.registryId ?? CONTRACTS.reasoningRegistry;
 
       const filters: rpc.Api.EventFilter[] = [
         { type: "contract", contractIds: [marketCoreId] },
         { type: "contract", contractIds: [usdcId] },
+        { type: "contract", contractIds: [registryId] },
       ];
 
       const response = await server.getEvents({
@@ -268,6 +272,29 @@ export class LedgerInvalidator {
             recordKey(["portfolio"]);
           }
         }
+      } else if (contractId === (this.opts.registryId ?? CONTRACTS.reasoningRegistry)) {
+        // Registry event: invalidate agent list, specific agent, and affected traces
+        const registryId = this.opts.registryId ?? CONTRACTS.reasoningRegistry;
+        recordKey(["stellar", "agents"]);
+        let decoded: import("./contract-events").DecodedContractEvent | null = null;
+        try {
+          decoded = decodeRegistryEvent(event as unknown as import("./events").RawContractEvent);
+        } catch {
+          // spec parse failure — broad invalidation above is sufficient
+        }
+        if (decoded) {
+          const addr = decoded.data.agent as string | undefined;
+          const traceId = decoded.data.trace_id as string | number | bigint | undefined;
+          if (addr && typeof addr === "string") {
+            recordKey(["stellar", "registry", "agent", addr]);
+          }
+          if (traceId !== undefined) {
+            const idStr = String(traceId);
+            recordKey(["stellar", "registry", "flag", idStr]);
+            recordKey(["stellar", "trace", idStr]);
+          }
+        }
+        void registryId; // used via opts above
       } else if (contractId === usdcId || event.type === "contract") {
         // USDC Token event: check if user address is involved
         if (userAddress) {

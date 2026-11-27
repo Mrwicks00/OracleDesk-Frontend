@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Keypair } from "@stellar/stellar-sdk";
-import { classifyTrade, classifyTrace, classifyResolved, classifyRedeemed, classifyDeadline } from "../classify";
+import { classifyTrade, classifyTrace, classifyResolved, classifyRedeemed, classifyDeadline, classifyStorageExpiring } from "../classify";
 import { RESOLUTION_GRACE_SECS } from "@/lib/stellar/resolution-deadline";
 import { isTradeEvent, type TradeEvent } from "@/lib/realtime/types";
 import { socketTrade } from "@/lib/hooks/useMarketTrades";
@@ -47,5 +47,25 @@ describe("wallet-only classification", () => {
     const passedItem = classifyDeadline("7", closeTime, deadline + 10n, owner, { yes: 10n, no: 0n });
     expect(passedItem).toMatchObject({ kind: "deadline-passed", id: "deadline:deadline-passed:7", marketId: "7" });
     expect(classifyDeadline("7", closeTime, deadline + 10n, owner, { yes: 0n, no: 0n })).toBeNull();
+  });
+  it("emits deduplicated storage-expiring notifications per threshold", () => {
+    const item30 = classifyStorageExpiring("7", "position", 25, 30, owner, 1000);
+    expect(item30).toMatchObject({
+      kind: "storage-expiring",
+      id: "storage-expiring:30:7",
+      marketId: "7",
+      data: {
+        entryKind: "position",
+        ttlDays: "25",
+        thresholdDays: "30",
+      },
+    });
+
+    const item7 = classifyStorageExpiring("7", "market", 5, 7, owner, 1000);
+    expect(item7).toMatchObject({
+      kind: "storage-expiring",
+      id: "storage-expiring:7:7",
+      marketId: "7",
+    });
   });
 });

@@ -87,7 +87,15 @@
         "AgentNotRegistered": "This agent isn't registered.",
         "TraceNotFound": "This reasoning trace isn't on-chain.",
         "EmptyAction": "The trace action can't be empty.",
-        "EmptyCid": "The trace needs an IPFS CID."
+        "EmptyCid": "The trace needs an IPFS CID.",
+        "CannotReactivateRevoked": "Revoked agents cannot be reactivated. Revocation is a terminal state.",
+        "InvalidEffectiveTime": "The effective time must be between the agent's registration and the current ledger.",
+        "FlagHistoryFull": "This trace's flag history is full (16 entries). No further flags or unflags can be recorded.",
+        "ChainHeadMismatch": "The trace sequence or previous hash doesn't match the agent's current chain head.",
+        "ChainedAgentMustChain": "This agent already has a trace chain. Use the chained publish flow.",
+        "TraceAlreadyConsumed": "This reasoning trace has already been used to back an on-chain action.",
+        "NoPendingAdmin": "No admin transfer is pending for this contract.",
+        "PendingAdminExpired": "The pending admin transfer has expired."
       }
     },
     "api": {
@@ -147,7 +155,8 @@
     "admin": "Admin",
     "search": "Search",
     "openCommandPalette": "Open command palette (Ctrl+K)",
-    "notifications": "Notifications"
+    "notifications": "Notifications",
+    "glossary": "Glossary"
   },
   "wallet": {
     "connect": "Connect Wallet",

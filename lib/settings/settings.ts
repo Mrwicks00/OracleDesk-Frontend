@@ -32,16 +32,50 @@ export interface NotificationSettings {
   shifts: boolean;
 }
 
+/** Signing-window preset. `standard` keeps the SDK-sized window; `extended` gives screen-reader and switch users more time. */
+export type TimingMode = "standard" | "extended";
+
+export interface TimingSettings {
+  mode: TimingMode;
+  /** Pause the home ticker, live trade feeds and trade tape on load. */
+  pauseAutoUpdates: boolean;
+}
+
+/**
+ * User-adjustable transaction timing (WCAG 2.2.1). Values are seconds of
+ * ledger time. Protocol limits (market close, ledger-based expirations) still
+ * clamp these; see `deadlineFor` in `lib/stellar/deadline.ts`.
+ */
+export const TIMING_LIMITS = {
+  standard: { txTimeoutS: 60, warnAtS: 20 },
+  extended: { txTimeoutS: 300, warnAtS: 20 },
+} as const;
+
 export interface TradingSettings {
   /** Slippage tolerance in basis points (integer). */
   slippageBps: number;
   notifications: NotificationSettings;
+  /** Storage TTL warning thresholds in days (e.g. [30, 7]). */
+  ttlThresholdsDays: number[];
+  timing: TimingSettings;
 }
 
 export const DEFAULT_SETTINGS: TradingSettings = {
   slippageBps: DEFAULT_SLIPPAGE_BPS,
   notifications: { execution: true, news: true, shifts: false },
+  ttlThresholdsDays: [30, 7],
+  timing: { mode: "standard", pauseAutoUpdates: false },
 };
+
+/** A fresh copy of the defaults, so callers can never mutate the shared object. */
+export function defaultSettings(): TradingSettings {
+  return {
+    ...DEFAULT_SETTINGS,
+    notifications: { ...DEFAULT_SETTINGS.notifications },
+    ttlThresholdsDays: [...DEFAULT_SETTINGS.ttlThresholdsDays],
+    timing: { ...DEFAULT_SETTINGS.timing },
+  };
+}
 
 /** True for an integer within [MIN_SLIPPAGE_BPS, MAX_SLIPPAGE_BPS]. */
 export function isValidSlippageBps(value: unknown): value is number {
@@ -51,6 +85,16 @@ export function isValidSlippageBps(value: unknown): value is number {
     value >= MIN_SLIPPAGE_BPS &&
     value <= MAX_SLIPPAGE_BPS
   );
+}
+
+function normalizeTiming(raw: unknown): TimingSettings {
+  const source = (raw && typeof raw === "object" ? raw : {}) as Partial<TimingSettings>;
+  return {
+    // Anything other than a known preset (including a tampered value) falls back to standard.
+    mode: source.mode === "extended" ? "extended" : DEFAULT_SETTINGS.timing.mode,
+    pauseAutoUpdates:
+      typeof source.pauseAutoUpdates === "boolean" ? source.pauseAutoUpdates : DEFAULT_SETTINGS.timing.pauseAutoUpdates,
+  };
 }
 
 function normalizeNotifications(raw: unknown): NotificationSettings {
@@ -76,6 +120,13 @@ export function normalizeSettings(raw: unknown): TradingSettings {
       ? source.slippageBps
       : DEFAULT_SLIPPAGE_BPS,
     notifications: normalizeNotifications(source.notifications),
+    timing: normalizeTiming(source.timing),
+    ttlThresholdsDays:
+      Array.isArray(source.ttlThresholdsDays) &&
+      source.ttlThresholdsDays.length > 0 &&
+      source.ttlThresholdsDays.every((n) => typeof n === "number" && Number.isFinite(n) && n > 0)
+        ? source.ttlThresholdsDays
+        : DEFAULT_SETTINGS.ttlThresholdsDays,
   };
 }
 
@@ -103,13 +154,13 @@ export function loadSettingsFrom(
   key: string,
   storage: SettingsStorage | null = browserStorage(),
 ): TradingSettings {
-  if (!storage) return { ...DEFAULT_SETTINGS, notifications: { ...DEFAULT_SETTINGS.notifications } };
+  if (!storage) return defaultSettings();
   try {
     const raw = storage.getItem(key);
-    if (!raw) return { ...DEFAULT_SETTINGS, notifications: { ...DEFAULT_SETTINGS.notifications } };
+    if (!raw) return defaultSettings();
     return normalizeSettings(JSON.parse(raw));
   } catch {
-    return { ...DEFAULT_SETTINGS, notifications: { ...DEFAULT_SETTINGS.notifications } };
+    return defaultSettings();
   }
 }
 

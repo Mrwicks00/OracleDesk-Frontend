@@ -5,7 +5,9 @@ import React, { useState } from "react";
 import { DropdownMenu as DM } from "radix-ui";
 import { useWalletActions, useWalletAddress, useWalletNetwork, useWalletSession } from "@/lib/contexts/WalletContext";
 import { useViewedAddress } from "@/lib/hooks/useViewedAddress";
-import { useAccountReserve, useEnableUsdc, useRpcNetwork, useUsdcBalance, useUsdcTrustline, useUsdcBalanceState } from "@/lib/hooks/useStellar";
+import { useAccountReserve, useEnableUsdc, useRpcNetwork, useUsdcBalance, useUsdcIssuerVerification, useUsdcTrustline, useUsdcBalanceState } from "@/lib/hooks/useStellar";
+import { isMainnetPassphrase } from "@/lib/stellar/issuer-verification";
+import { SafeText } from "@/components/safe-text";
 import { NETWORK_LABEL, NETWORK_PASSPHRASE, TESTNET_PASSPHRASE, explorerAccount } from "@/lib/stellar/config";
 import { PendingValue } from "@/components/pending-value";
 import { DevProfiler } from "@/lib/dev/profiler";
@@ -26,6 +28,9 @@ const WalletDropdownBody = () => {
   const balanceState = useUsdcBalanceState(address);
   const trustline = useUsdcTrustline(address);
   const enableUsdc = useEnableUsdc();
+  const issuerVerification = useUsdcIssuerVerification();
+  const mainnet = isMainnetPassphrase();
+  const issuerBlockedOnMainnet = mainnet && issuerVerification.data?.status !== "verified";
   const reserve = useAccountReserve(address);
   const rpcNetwork = useRpcNetwork();
 
@@ -185,7 +190,27 @@ const WalletDropdownBody = () => {
                 )}
               </div>
             )}
-            {trustlineMissing && !isWrongNetwork && (
+            {issuerVerification.data?.status === "verified" && (
+              <p className="mt-1.5 text-[11px] text-secondary">
+                Issuer verified:{" "}
+                <SafeText
+                  text={issuerVerification.data.orgName || issuerVerification.data.homeDomain}
+                  truncate={60}
+                  showToggle={false}
+                />
+                {issuerVerification.data.orgName && (
+                  <> (<SafeText text={issuerVerification.data.homeDomain} truncate={50} showToggle={false} />)</>
+                )}
+              </p>
+            )}
+            {issuerVerification.data && issuerVerification.data.status !== "verified" && (
+              <p className={`mt-1.5 text-[11px] ${mainnet ? "text-error" : "text-tertiary"}`} role="status">
+                {mainnet
+                  ? `Mainnet issuer verification failed (${issuerVerification.data.status}): ${issuerVerification.data.detail}`
+                  : `Testnet warning — issuer ${issuerVerification.data.status}: ${issuerVerification.data.detail}`}
+              </p>
+            )}
+            {trustlineMissing && !isWrongNetwork && !issuerBlockedOnMainnet && (
               <button
                 type="button"
                 onClick={handleEnableUsdc}

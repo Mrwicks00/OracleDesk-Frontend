@@ -1,3 +1,5 @@
+import { TIMING_LIMITS, type TimingMode } from "@/lib/settings/settings";
+
 export const DEFAULT_TX_TIMEOUT_S = 60;
 export const SAFETY_MARGIN_S = 10;
 export const MIN_TX_TIMEOUT_S = 15;
@@ -34,6 +36,14 @@ export function deadlineFor(
 
   const now = Math.floor(ledgerNow);
   return { timeoutInSeconds: desiredTimeout, maxTime: now + desiredTimeout };
+}
+
+/** Seconds before expiry at which the signing countdown warns the user. */
+export const WARN_BEFORE_EXPIRY_S = TIMING_LIMITS.standard.warnAtS;
+
+/** Requested transaction timeout for a user's timing preference (before market-close clamping). */
+export function timeoutForTiming(mode: TimingMode): number {
+  return TIMING_LIMITS[mode].txTimeoutS;
 }
 
 export function assertSigningDeadline(deadline: TransactionDeadline, ledgerNow: number | null): void {

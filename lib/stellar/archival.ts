@@ -1,4 +1,5 @@
 import type { AssembledTransaction } from '@stellar/stellar-sdk/contract';
+export { prepareRestore, createRestoreCallback } from './ttl';
 
 export const isArchivedStateError = (error: unknown): boolean => /archiv|missing ledger entry|ttl|entry.?not.?found/i.test(String(error));
 

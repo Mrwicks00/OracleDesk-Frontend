@@ -7,6 +7,8 @@
 import { transition, initialWalletState, viewOf, type WalletEffect, type WalletEvent, type WalletState } from "./wallet-machine";
 import type { WalletKitAdapter } from "./wallet-kit-adapter";
 import type { SyncMessage } from "@/lib/api/cross-tab-sync";
+import { UserFacingError } from "./errors";
+import { isKitUnsupported, modulesSupporting, recordOutcome } from "./wallet-capabilities";
 
 export interface WalletInterpreterDeps {
   /** Re-probes the wallet and returns a validator for a late signature. */
@@ -173,7 +175,23 @@ export class WalletInterpreter {
     assertAccount();
     const kit = await this.kit();
     if (!kit.signAuthEntry) throw new Error("This wallet can't sign Soroban authorization entries.");
-    const result = await kit.signAuthEntry(authEntry, opts);
+    const moduleId = kit.selectedModuleId?.() ?? null;
+    let result: Awaited<ReturnType<NonNullable<WalletKitAdapter["signAuthEntry"]>>>;
+    try {
+      result = await kit.signAuthEntry(authEntry, opts);
+    } catch (err) {
+      if (isKitUnsupported(err)) {
+        if (moduleId) recordOutcome(moduleId, "signAuthEntry", "unsupported");
+        const alternatives = modulesSupporting("signAuthEntry").map((id) => id.charAt(0).toUpperCase() + id.slice(1));
+        const suggestion = alternatives.length > 0 ? `, such as ${alternatives.join(" or ")}` : "";
+        throw new UserFacingError(
+          { kind: "unknown", message: `This wallet can't sign Soroban authorization entries. Use a wallet that supports them${suggestion}.` },
+          err,
+        );
+      }
+      throw err;
+    }
+    if (moduleId) recordOutcome(moduleId, "signAuthEntry", "ok");
     validate?.();
     const validateAfter = await this.deps.beforeSign?.(opts.address);
     validate?.(); validateAfter?.();
